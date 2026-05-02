@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Netherlayer — QLD Gold Prospectivity Model</title>
+<style>
+/* ─── Design tokens ─── */
+:root {
+  --bg:       #0e0e1c;
+  --surface:  #0e0e1c;
+  --raised:   #13132a;
+  --sh-dark:  #07070f;
+  --sh-light: #191933;
+  --gold:     #d4af37;
+  --gold2:    #f0c040;
+  --gold3:    #7a5c00;
+  --text:     #d8d8f0;
+  --muted:    #7070a0;
+  --accent:   #e67e22;
+  --green:    #2ecc71;
+  --red:      #e74c3c;
+  --radius:   16px;
+  --gap:      clamp(16px, 3vw, 32px);
+}
+
+/* ─── Reset ─── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+a { color: var(--gold); text-decoration: none; }
+a:hover { color: var(--gold2); }
+
+/* ─── Neomorphism helpers ─── */
+.nm-raised {
+  background: var(--surface);
+  box-shadow: 6px 6px 16px var(--sh-dark), -6px -6px 16px var(--sh-light);
+  border-radius: var(--radius);
+}
+.nm-inset {
+  background: var(--surface);
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+  border-radius: var(--radius);
+}
+.nm-card {
+  background: var(--surface);
+  box-shadow: 8px 8px 20px var(--sh-dark), -8px -8px 20px var(--sh-light);
+  border-radius: var(--radius);
+  transition: box-shadow .25s, transform .25s;
+}
+.nm-card:hover {
+  box-shadow: 12px 12px 28px var(--sh-dark), -12px -12px 28px var(--sh-light);
+  transform: translateY(-2px);
+}
+
+/* ─── Layout ─── */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 var(--gap);
+}
+section { padding: clamp(48px, 8vw, 96px) 0; }
+section + section { padding-top: 0; }
+
+/* ─── Nav ─── */
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(14,14,28,.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(212,175,55,.15);
+  padding: 14px var(--gap);
+}
+.nav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.nav-logo {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--gold2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-logo svg { flex-shrink: 0; }
+.nav-links {
+  display: flex;
+  gap: 24px;
+  margin-left: auto;
+  list-style: none;
+}
+.nav-links a {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: .5px;
+  transition: color .2s;
+}
+.nav-links a:hover { color: var(--gold); }
+.nav-cta {
+  margin-left: 16px;
+  padding: 7px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--gold3), var(--gold));
+  color: #0e0e1c;
+  white-space: nowrap;
+  transition: opacity .2s, transform .15s;
+  box-shadow: 0 2px 12px rgba(212,175,55,.3);
+}
+.nav-cta:hover { opacity: .88; transform: translateY(-1px); color: #0e0e1c; }
+
+/* ─── Hero ─── */
+#hero {
+  padding: clamp(64px, 12vw, 128px) 0 clamp(48px, 8vw, 80px);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.hero-glow {
+  position: absolute;
+  top: -120px; left: 50%; transform: translateX(-50%);
+  width: clamp(300px, 70vw, 700px);
+  height: clamp(300px, 70vw, 700px);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(212,175,55,.09) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--gold);
+  border: 1px solid rgba(212,175,55,.3);
+  padding: 5px 16px;
+  border-radius: 999px;
+  margin-bottom: 28px;
+}
+#hero h1 {
+  font-size: clamp(42px, 10vw, 96px);
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1;
+  background: linear-gradient(135deg, var(--gold2) 0%, var(--gold) 50%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 20px;
+}
+.hero-sub {
+  font-size: clamp(15px, 2.5vw, 20px);
+  color: var(--muted);
+  max-width: 600px;
+  margin: 0 auto 40px;
+  line-height: 1.7;
+}
+.hero-cta-group {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 64px;
+}
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--gold3) 0%, var(--gold) 100%);
+  color: #0e0e1c;
+  box-shadow: 0 4px 24px rgba(212,175,55,.35), 6px 6px 16px var(--sh-dark), -2px -2px 8px var(--sh-light);
+  transition: transform .2s, box-shadow .2s, opacity .2s;
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(212,175,55,.45), 8px 8px 20px var(--sh-dark), -2px -2px 10px var(--sh-light);
+  opacity: .95;
+  color: #0e0e1c;
+}
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gold);
+  box-shadow: 6px 6px 16px var(--sh-dark), -6px -6px 16px var(--sh-light);
+  transition: transform .2s, box-shadow .2s;
+}
+.btn-secondary:hover {
+  transform: translateY(-2px);
+  box-shadow: 8px 8px 22px var(--sh-dark), -8px -8px 22px var(--sh-light);
+  color: var(--gold2);
+}
+
+/* ─── Hero stat strip ─── */
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  margin-top: 0;
+}
+.stat-card {
+  padding: 22px 16px;
+  text-align: center;
+}
+.stat-card .num {
+  font-size: clamp(26px, 5vw, 38px);
+  font-weight: 800;
+  color: var(--gold2);
+  line-height: 1;
+  display: block;
+}
+.stat-card .lbl {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  margin-top: 6px;
+  display: block;
+}
+
+/* ─── Section headings ─── */
+.sec-label {
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+h2 {
+  font-size: clamp(24px, 4vw, 38px);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 14px;
+}
+.sec-intro {
+  color: var(--muted);
+  max-width: 680px;
+  font-size: 16px;
+  margin-bottom: clamp(32px, 5vw, 56px);
+  line-height: 1.7;
+}
+
+/* ─── Pipeline steps ─── */
+.pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--gap);
+}
+.pipeline-card {
+  padding: 28px 24px;
+  position: relative;
+}
+.step-num {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--gold3);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.pipeline-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gold2);
+  margin-bottom: 10px;
+}
+.pipeline-card p {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.step-icon {
+  font-size: 28px;
+  margin-bottom: 14px;
+  display: block;
+}
+
+/* ─── Sources grid ─── */
+.sources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.source-card {
+  padding: 20px 18px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.source-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  background: rgba(212,175,55,.1);
+}
+.source-card h4 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.source-card p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ─── Results ─── */
+.results-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+  align-items: start;
+}
+@media (max-width: 700px) { .results-layout { grid-template-columns: 1fr; } }
+
+.model-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.model-table th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(212,175,55,.15);
+}
+.model-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  color: var(--text);
+}
+.model-table tr:last-child td { border-bottom: none; }
+.model-table .best td { color: var(--gold2); }
+.model-table .best td:first-child::before {
+  content: '★ ';
+  color: var(--gold);
+}
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(212,175,55,.15);
+  color: var(--gold2);
+}
+.badge-green {
+  background: rgba(46,204,113,.15);
+  color: var(--green);
+}
+.badge-red {
+  background: rgba(231,76,60,.15);
+  color: var(--red);
+}
+
+/* Confusion summary box */
+.cm-box {
+  padding: 24px;
+}
+.cm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+.cm-cell {
+  padding: 14px;
+  border-radius: 10px;
+  text-align: center;
+}
+.cm-tn { background: rgba(46,204,113,.12); }
+.cm-fp { background: rgba(231,76,60,.1); }
+.cm-fn { background: rgba(231,76,60,.06); }
+.cm-tp { background: rgba(212,175,55,.15); }
+.cm-cell .cm-val { font-size: 22px; font-weight: 800; line-height: 1; }
+.cm-cell .cm-pct { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.cm-cell .cm-lbl { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.cm-tn .cm-val { color: var(--green); }
+.cm-fp .cm-val { color: var(--red); }
+.cm-fn .cm-val { color: #e67e22; }
+.cm-tp .cm-val { color: var(--gold2); }
+
+/* ─── Feature importance bars ─── */
+.feat-bars { display: flex; flex-direction: column; gap: 12px; }
+.feat-row { display: flex; align-items: center; gap: 12px; }
+.feat-name {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 160px;
+  flex-shrink: 0;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.feat-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  box-shadow: inset 3px 3px 8px var(--sh-dark), inset -3px -3px 8px var(--sh-light);
+  overflow: hidden;
+}
+.feat-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--gold3), var(--gold));
+  width: 0;
+  transition: width 1.2s cubic-bezier(.22,.61,.36,1);
+}
+.feat-pct {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  min-width: 42px;
+  text-align: right;
+}
+
+/* ─── Threshold precision table ─── */
+.thresh-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.thresh-table th {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(212,175,55,.15);
+}
+.thresh-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.thresh-table tr.highlight td { color: var(--gold2); }
+.prec-bar-wrap { display: flex; align-items: center; gap: 8px; }
+.prec-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--gold3), var(--gold));
+  transition: width 1s ease;
+}
+
+/* ─── CTA section ─── */
+#cta {
+  text-align: center;
+}
+.cta-card {
+  padding: clamp(40px, 8vw, 72px) clamp(24px, 6vw, 64px);
+  background: linear-gradient(135deg, rgba(212,175,55,.06) 0%, rgba(14,14,28,0) 100%);
+  border: 1px solid rgba(212,175,55,.15);
+  border-radius: 24px;
+  position: relative;
+  overflow: hidden;
+}
+.cta-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, rgba(212,175,55,.08) 0%, transparent 60%);
+  pointer-events: none;
+}
+.cta-card h2 { font-size: clamp(26px, 5vw, 44px); }
+
+/* ─── Footer ─── */
+footer {
+  padding: 32px var(--gap);
+  border-top: 1px solid rgba(255,255,255,.06);
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ─── Animations ─── */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity .7s ease, transform .7s ease;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: none;
+}
+.reveal-delay-1 { transition-delay: .1s; }
+.reveal-delay-2 { transition-delay: .2s; }
+.reveal-delay-3 { transition-delay: .3s; }
+.reveal-delay-4 { transition-delay: .4s; }
+
+/* ─── Mobile nav ─── */
+.nav-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  margin-left: auto;
+  color: var(--gold);
+  font-size: 22px;
+}
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .nav-cta { display: none; }
+  .nav-menu-btn { display: block; }
+  .nav-links.open {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 56px; left: 0; right: 0;
+    background: rgba(14,14,28,.98);
+    padding: 20px var(--gap);
+    gap: 16px;
+    border-bottom: 1px solid rgba(212,175,55,.15);
+    z-index: 200;
+  }
+  .nav-links.open a { font-size: 15px; }
+  .nav-links.open .nav-cta-mobile {
+    display: block;
+    padding: 12px 20px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--gold3), var(--gold));
+    color: #0e0e1c;
+    font-weight: 700;
+    font-size: 15px;
+    text-align: center;
+    margin-top: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .feat-name { min-width: 110px; font-size: 11px; }
+  .hero-cta-group { flex-direction: column; align-items: center; }
+  .btn-primary, .btn-secondary { width: 100%; justify-content: center; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Nav ── -->
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <polygon points="11,1 14,8 21,8.5 16,13.5 17.5,21 11,17 4.5,21 6,13.5 1,8.5 8,8"
+                 fill="#d4af37" opacity=".9"/>
+      </svg>
+      NETHERLAYER
+    </div>
+    <ul class="nav-links" id="nav-links">
+      <li><a href="#pipeline">Pipeline</a></li>
+      <li><a href="#data">Data</a></li>
+      <li><a href="#results">Results</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="prospects_map.html" class="nav-cta-mobile">Open Map →</a></li>
+    </ul>
+    <a href="prospects_map.html" class="nav-cta">Open Map →</a>
+    <button class="nav-menu-btn" id="nav-menu-btn" aria-label="Menu">☰</button>
+  </div>
+</nav>
+
+<!-- ── Hero ── -->
+<section id="hero">
+  <div class="hero-glow"></div>
+  <div class="container">
+    <span class="hero-eyebrow reveal">Queensland Gold Prospectivity Model</span>
+    <h1 class="reveal reveal-delay-1">NETHERLAYER</h1>
+    <p class="hero-sub reveal reveal-delay-2">
+      A stacking ensemble classifier trained on 209,899 geological centroid records
+      across Queensland — identifying virgin ground with the signature of gold.
+    </p>
+    <div class="hero-cta-group reveal reveal-delay-3">
+      <a href="prospects_map.html" class="btn-primary">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 1a5 5 0 100 10A5 5 0 008 1zM0 8a8 8 0 1116 0A8 8 0 010 8z"/>
+          <path d="M8 5a.5.5 0 01.5.5v2.293l1.354 1.353a.5.5 0 01-.708.708l-1.5-1.5A.5.5 0 017.5 8V5.5A.5.5 0 018 5z"/>
+        </svg>
+        Open 21st Century Goldfields
+      </a>
+      <a href="#pipeline" class="btn-secondary">
+        How it works ↓
+      </a>
+    </div>
+
+    <!-- Stat strip -->
+    <div class="stat-strip reveal reveal-delay-4">
+      <div class="stat-card nm-card">
+        <span class="num" data-target="209899" data-suffix="">0</span>
+        <span class="lbl">Geological Sites</span>
+      </div>
+      <div class="stat-card nm-card">
+        <span class="num" data-target="21403" data-suffix="">0</span>
+        <span class="lbl">Known Gold Locations</span>
+      </div>
+      <div class="stat-card nm-card">
+        <span class="num" data-target="94.7" data-suffix="%" data-decimals="1">0</span>
+        <span class="lbl">Precision at &gt;60%</span>
+      </div>
+      <div class="stat-card nm-card">
+        <span class="num" data-target="862" data-suffix="">0</span>
+        <span class="lbl">New Prospect Sites</span>
+      </div>
+      <div class="stat-card nm-card">
+        <span class="num" data-target="0.903" data-suffix="" data-decimals="3">0</span>
+        <span class="lbl">ROC-AUC Score</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── What it does ── -->
+<section id="about">
+  <div class="container">
+    <p class="sec-label reveal">What it does</p>
+    <h2 class="reveal">Find gold before others do.</h2>
+    <p class="sec-intro reveal">
+      Netherlayer learns the geological, structural, and hydrological signature of every known
+      gold occurrence in Queensland — then applies that pattern to every mapped geological unit
+      to identify locations with the same signature but <em>no recorded gold history</em>.
+      The output is a ranked, explainable probability surface for the entire state.
+    </p>
+    <div class="sources-grid">
+      <div class="source-card nm-card reveal reveal-delay-1">
+        <div class="source-icon">🏔️</div>
+        <div>
+          <h4>1:100k Solid Geology</h4>
+          <p>Detailed lithological units from the Queensland geological survey — rock type, geological features, structural setting.</p>
+        </div>
+      </div>
+      <div class="source-card nm-card reveal reveal-delay-2">
+        <div class="source-icon">⚡</div>
+        <div>
+          <h4>Structural Geology</h4>
+          <p>Fault lines, dykes, veins and intrusion contacts from the state structural dataset — key fluid pathways for gold transport.</p>
+        </div>
+      </div>
+      <div class="source-card nm-card reveal reveal-delay-3">
+        <div class="source-icon">💧</div>
+        <div>
+          <h4>Hydrological Network</h4>
+          <p>Named watercourses plus OSM waterways — stream proximity concentrates alluvial gold and reveals catchment signatures.</p>
+        </div>
+      </div>
+      <div class="source-card nm-card reveal reveal-delay-4">
+        <div class="source-icon">🗺️</div>
+        <div>
+          <h4>Road Network (OSM)</h4>
+          <p>Full QLD road network — 472,000+ road segments used to score exploration accessibility and estimate prospecting history.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Pipeline ── -->
+<section id="pipeline">
+  <div class="container">
+    <p class="sec-label reveal">Training Pipeline</p>
+    <h2 class="reveal">Five stages from raw data to actionable prospect.</h2>
+    <p class="sec-intro reveal">
+      Each step is a standalone Python script, reproducible from source data.
+    </p>
+    <div class="pipeline-grid">
+      <div class="pipeline-card nm-card reveal reveal-delay-1">
+        <span class="step-icon">🏷️</span>
+        <div class="step-num">Step 00</div>
+        <h3>Build Gold Labels</h3>
+        <p>Aggregates 21,403 known gold locations from 6 independent sources — KMZ waypoints, QLD Govt MINOCC database, historic and dead mining leases, claims, and MDLs. Deduplicates at a 200m grid.</p>
+      </div>
+      <div class="pipeline-card nm-card reveal reveal-delay-2">
+        <span class="step-icon">📐</span>
+        <div class="step-num">Step 01</div>
+        <h3>Feature Engineering</h3>
+        <p>Labels each of 209,899 centroid records by KD-tree proximity to gold (1 km radius). Computes 16 spatial features: distances to faults, veins, watercourses, roads, rock class encoding, and structural indicators.</p>
+      </div>
+      <div class="pipeline-card nm-card reveal reveal-delay-3">
+        <span class="step-icon">🧠</span>
+        <div class="step-num">Step 02</div>
+        <h3>Train Ensemble</h3>
+        <p>Trains Random Forest, XGBoost and LightGBM on 80% of the data with out-of-fold cross-validation. A Logistic Regression meta-learner stacks their probability outputs. Threshold tuned for precision-heavy F₀.₅.</p>
+      </div>
+      <div class="pipeline-card nm-card reveal reveal-delay-4">
+        <span class="step-icon">🌐</span>
+        <div class="step-num">Step 03</div>
+        <h3>Probability Surface</h3>
+        <p>Applies the stacking ensemble to all 209,899 centroids in batches, generating a full-state gold probability surface. At ≥60% probability, only 862 new (non-database) locations survive — these are the map targets.</p>
+      </div>
+      <div class="pipeline-card nm-card reveal">
+        <span class="step-icon">🗃️</span>
+        <div class="step-num">Step 04+</div>
+        <h3>Enrich &amp; Map</h3>
+        <p>Each prospect is enriched with road distance, opportunity score (probability × remoteness), terrain hint, and plain-English geological explanation. Displayed on an interactive Leaflet map alongside all 21,403 known sites.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Data sources ── -->
+<section id="data">
+  <div class="container">
+    <p class="sec-label reveal">Gold Location Sources</p>
+    <h2 class="reveal">Every known gold occurrence in Queensland, unified.</h2>
+    <p class="sec-intro reveal">
+      Six independent datasets are merged and deduplicated into a single authoritative training label file.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
+      <div class="nm-card reveal reveal-delay-1" style="padding:22px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">KMZ Waypoints</span>
+          <span class="badge">7,158</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">Abandoned gold mines and mineral deposits from AU_QLD_GoldWaypoints.kmz — highest positional precision.</p>
+      </div>
+      <div class="nm-card reveal reveal-delay-2" style="padding:22px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">MINOCC Database</span>
+          <span class="badge">1,961</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">Queensland Government mineral occurrence database (Layer 12, ArcGIS REST service) — same data as Queensland Globe.</p>
+      </div>
+      <div class="nm-card reveal reveal-delay-3" style="padding:22px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">Historic Mining Leases</span>
+          <span class="badge">7,327</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">QLD Govt historic lease point records filtered to AU commodity — large coverage of worked ground.</p>
+      </div>
+      <div class="nm-card reveal reveal-delay-1" style="padding:22px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">Dead Mining Leases</span>
+          <span class="badge">3,264</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">Expired lease polygons — centroid projected via GDA2020/MGA zone 54 for accuracy.</p>
+      </div>
+      <div class="nm-card reveal reveal-delay-2" style="padding:22px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">Dead Mining Claims</span>
+          <span class="badge">1,600</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">Expired small-miner claim polygons — many correspond to individual creek colour finds.</p>
+      </div>
+      <div class="nm-card reveal reveal-delay-3" style="padding:22px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">MDLs &amp; Manual</span>
+          <span class="badge">93</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted)">Dead mineral development licences plus user-confirmed locations verified in Queensland Globe.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Results ── -->
+<section id="results">
+  <div class="container">
+    <p class="sec-label reveal">Model Results</p>
+    <h2 class="reveal">Evaluated on a genuine held-out test set.</h2>
+    <p class="sec-intro reveal">
+      A stratified 80/20 train/test split ensures all reported metrics reflect real generalisation,
+      not in-sample performance. Threshold tuned for F₀.₅ — precision weighted 4× over recall,
+      because misdirected fieldwork costs more than a missed site.
+    </p>
+
+    <div class="results-layout">
+      <!-- Model comparison table -->
+      <div class="nm-card reveal" style="padding:24px;overflow-x:auto">
+        <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:16px">Model Comparison — Test Set</div>
+        <table class="model-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>PR-AUC</th>
+              <th>ROC-AUC</th>
+              <th>Precision</th>
+              <th>Recall</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Random Forest</td>
+              <td>0.558</td>
+              <td>0.900</td>
+              <td><span class="badge">70.2%</span></td>
+              <td>34.4%</td>
+            </tr>
+            <tr>
+              <td>XGBoost</td>
+              <td>0.471</td>
+              <td>0.877</td>
+              <td><span class="badge">62.2%</span></td>
+              <td>26.7%</td>
+            </tr>
+            <tr>
+              <td>LightGBM</td>
+              <td>0.521</td>
+              <td>0.891</td>
+              <td><span class="badge">67.7%</span></td>
+              <td>28.9%</td>
+            </tr>
+            <tr class="best">
+              <td>Stack Ensemble</td>
+              <td>0.569</td>
+              <td>0.903</td>
+              <td><span class="badge">68.6%</span></td>
+              <td>37.1%</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
+          Stack = RF + XGB + LGB → Logistic Regression meta-learner.<br>
+          pos_weight = √(imbalance ratio) = 3.25 to moderate, not eliminate, the 8.7% class imbalance.
+        </p>
+      </div>
+
+      <!-- Confusion matrix breakdown -->
+      <div class="cm-box nm-card reveal reveal-delay-2">
+        <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Test-set Confusion Matrix</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Stack Ensemble · threshold 0.450 · n=41,980</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:12px;font-size:10px;text-align:center;color:var(--muted)">
+          <div></div><div>Pred: Non-Gold</div><div>Pred: Gold</div>
+        </div>
+        <div class="cm-grid">
+          <div class="cm-cell cm-tn">
+            <div class="cm-lbl">True Neg</div>
+            <div class="cm-val">37,693</div>
+            <div class="cm-pct">98.3% of non-gold</div>
+          </div>
+          <div class="cm-cell cm-fp">
+            <div class="cm-lbl">False Pos</div>
+            <div class="cm-val">651</div>
+            <div class="cm-pct">1.7% of non-gold</div>
+          </div>
+          <div class="cm-cell cm-fn">
+            <div class="cm-lbl">False Neg</div>
+            <div class="cm-val">2,264</div>
+            <div class="cm-pct">62.3% of gold</div>
+          </div>
+          <div class="cm-cell cm-tp">
+            <div class="cm-lbl">True Pos</div>
+            <div class="cm-val">1,372</div>
+            <div class="cm-pct">37.7% of gold</div>
+          </div>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
+          High recall is sacrificed intentionally — the map already filters at ≥60% probability,
+          where precision rises to <strong style="color:var(--gold)">94.7%</strong>.
+        </p>
+      </div>
+    </div>
+
+    <!-- Precision by threshold -->
+    <div class="nm-card reveal" style="padding:24px;margin-top:var(--gap);overflow-x:auto">
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:16px">Map Precision by Probability Threshold</div>
+      <table class="thresh-table">
+        <thead>
+          <tr>
+            <th>Threshold</th>
+            <th>Total Sites</th>
+            <th>Known Gold</th>
+            <th>New Prospects</th>
+            <th>Precision</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>≥ 30%</td><td>17,526</td><td>15,890</td><td>1,636</td>
+            <td><div class="prec-bar-wrap"><div class="prec-bar" style="width:91px"></div>90.7%</div></td></tr>
+          <tr><td>≥ 40%</td><td>17,020</td><td>15,709</td><td>1,311</td>
+            <td><div class="prec-bar-wrap"><div class="prec-bar" style="width:92px"></div>92.3%</div></td></tr>
+          <tr><td>≥ 50%</td><td>16,582</td><td>15,509</td><td>1,073</td>
+            <td><div class="prec-bar-wrap"><div class="prec-bar" style="width:93px"></div>93.5%</div></td></tr>
+          <tr class="highlight"><td><strong>≥ 60% (map)</strong></td><td>16,127</td><td>15,265</td><td><strong>862</strong></td>
+            <td><div class="prec-bar-wrap"><div class="prec-bar" style="width:95px;background:linear-gradient(90deg,#7a5c00,var(--gold2))"></div><strong style="color:var(--gold2)">94.7%</strong></div></td></tr>
+          <tr><td>≥ 70%</td><td>15,587</td><td>14,900</td><td>687</td>
+            <td><div class="prec-bar-wrap"><div class="prec-bar" style="width:96px"></div>95.6%</div></td></tr>
+          <tr><td>≥ 80%</td><td>14,817</td><td>14,299</td><td>518</td>
+            <td><div class="prec-bar-wrap"><div class="prec-bar" style="width:96px"></div>96.5%</div></td></tr>
+          <tr><td>≥ 90%</td><td>13,448</td><td>13,103</td><td>345</td>
+            <td><div class="prec-bar-wrap"><div class="prec-bar" style="width:97px"></div>97.4%</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── Feature importance ── -->
+<section id="features">
+  <div class="container">
+    <p class="sec-label reveal">Feature Importance</p>
+    <h2 class="reveal">What geology predicts gold.</h2>
+    <p class="sec-intro reveal">
+      Averaged across all three base models (normalised to sum to 1).
+      Distance to the nearest dyke or vein dominates — consistent with hydrothermal gold theory.
+    </p>
+    <div class="nm-card reveal" style="padding:28px 28px 24px">
+      <div class="feat-bars" id="feat-bars">
+        <!-- filled by JS -->
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ── -->
+<section id="cta">
+  <div class="container">
+    <div class="cta-card reveal">
+      <p class="sec-label">21st Century Goldfields</p>
+      <h2>862 new prospects.<br>The whole state. Your call.</h2>
+      <p style="color:var(--muted);max-width:560px;margin:16px auto 40px;font-size:16px;line-height:1.7">
+        Every location comes with its geological explanation, road distance,
+        terrain hint, proximity to faults and waterways, and direct links to
+        Google Maps and OpenStreetMap — ready for field planning.
+      </p>
+      <a href="prospects_map.html" class="btn-primary" style="font-size:17px;padding:16px 40px">
+        Open 21st Century Goldfields →
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div>
+    <strong style="color:var(--gold)">NETHERLAYER</strong> &nbsp;·&nbsp;
+    Queensland Gold Prospectivity Model &nbsp;·&nbsp;
+    RF + XGB + LGB Stacking Ensemble &nbsp;·&nbsp;
+    Data: QLD Geological Survey, MINOCC, OSM
+  </div>
+  <div style="margin-top:8px">
+    Trained on publicly available data. Not a guarantee of gold mineralisation.
+    Field verification required.
+  </div>
+</footer>
+
+<script>
+// ── Intersection observer for reveal + counter animations ──
+const features = [
+  { name: 'dist_dyke_vein_km',   pct: 16.9, label: 'Dist. to dyke / vein' },
+  { name: 'geology_type_freq',   pct: 14.6, label: 'Rock unit frequency' },
+  { name: 'dist_stream_km',      pct: 12.3, label: 'Dist. to named stream' },
+  { name: 'dist_osm_km',         pct: 10.9, label: 'Dist. to OSM waterway' },
+  { name: 'dist_fault_km',       pct: 10.0, label: 'Dist. to fault' },
+  { name: 'dist_any_water_km',   pct:  8.6, label: 'Dist. to any water' },
+  { name: 'geology_type_label',  pct:  8.1, label: 'Rock unit label (top-100)' },
+  { name: 'is_igneous',          pct:  4.7, label: 'Is igneous host' },
+  { name: 'is_sedimentary',      pct:  4.1, label: 'Is sedimentary host' },
+  { name: 'struct_fault_zone',   pct:  2.4, label: 'Structural: fault zone' },
+];
+
+const bars = document.getElementById('feat-bars');
+features.forEach(f => {
+  bars.innerHTML += `
+  <div class="feat-row">
+    <span class="feat-name">${f.label}</span>
+    <div class="feat-track">
+      <div class="feat-fill" data-pct="${f.pct}" style="width:0"></div>
+    </div>
+    <span class="feat-pct">${f.pct}%</span>
+  </div>`;
+});
+
+// Reveal observer
+const revealObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('visible');
+      revealObserver.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.12 });
+
+document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+// Counter animation
+function animateCounter(el) {
+  const target   = parseFloat(el.dataset.target);
+  const suffix   = el.dataset.suffix || '';
+  const decimals = parseInt(el.dataset.decimals || '0');
+  const duration = 1800;
+  const start    = performance.now();
+  function tick(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    const val  = target * ease;
+    el.textContent = (decimals > 0 ? val.toFixed(decimals) : Math.round(val).toLocaleString()) + suffix;
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+const counterObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      animateCounter(e.target);
+      counterObserver.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.5 });
+
+document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe(el));
+
+// Feature bar animation
+const barObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.querySelectorAll('.feat-fill').forEach(fill => {
+        fill.style.width = fill.dataset.pct + '%';
+      });
+      barObserver.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.2 });
+
+barObserver.observe(bars);
+
+// Mobile nav
+document.getElementById('nav-menu-btn').addEventListener('click', () => {
+  document.getElementById('nav-links').classList.toggle('open');
+});
+
+// Close nav on link click
+document.querySelectorAll('#nav-links a').forEach(a => {
+  a.addEventListener('click', () => document.getElementById('nav-links').classList.remove('open'));
+});
+</script>
+</body>
+</html>

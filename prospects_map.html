@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>21st Century Goldfields — Netherlayer</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+
+<style>
+:root {
+  --bg:      #0e0e1c;
+  --panel:   #111120;
+  --panel2:  #16162a;
+  --border:  rgba(212,175,55,.2);
+  --gold:    #d4af37;
+  --gold2:   #f0c040;
+  --text:    #d8d8f0;
+  --muted:   #6868a0;
+  --sh-d:    #07070f;
+  --sh-l:    #191933;
+  --red:     #e74c3c;
+  --amber:   #e67e22;
+  --yellow:  #f1c40f;
+  --green:   #27ae60;
+  --panel-w: 300px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+#header {
+  background: linear-gradient(90deg, #080812 0%, #13132a 50%, #080812 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  height: 52px;
+  z-index: 400;
+}
+#header-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+#header-logo svg { flex-shrink: 0; }
+#header h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold2);
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+#header .sub {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  display: none;
+}
+.stat-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  margin-left: auto;
+  overflow: hidden;
+}
+.badge-stat {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.badge-stat strong { color: var(--gold); }
+
+/* hamburger */
+#menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--gold);
+  font-size: 22px;
+  padding: 4px 6px;
+  margin-left: 6px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* ── Main ── */
+#app {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Panel ── */
+#panel {
+  width: var(--panel-w);
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform .25s cubic-bezier(.4,0,.2,1);
+  z-index: 300;
+}
+#panel-inner {
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Desktop collapse — shrinks into sidebar */
+#panel.collapsed { transform: translateX(calc(-1 * var(--panel-w))); }
+
+#panel-toggle {
+  position: absolute;
+  left: var(--panel-w);
+  top: 10px;
+  z-index: 310;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: none;
+  color: var(--gold);
+  padding: 7px 9px;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 0 6px 6px 0;
+  transition: left .25s cubic-bezier(.4,0,.2,1);
+  line-height: 1;
+  box-shadow: 3px 0 8px rgba(0,0,0,.4);
+}
+#panel.collapsed + #panel-toggle { left: 0; }
+
+/* overlay for mobile */
+#panel-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 290;
+  backdrop-filter: blur(2px);
+}
+
+/* ── Section headings in panel ── */
+.sec-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.8px;
+  color: var(--gold);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 5px;
+  margin: 14px 0 10px;
+}
+.sec-head:first-child { margin-top: 0; }
+
+/* ── Toggles ── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.toggle-row input[type=checkbox] {
+  accent-color: var(--gold);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.toggle-row span { font-size: 13px; line-height: 1.3; }
+.toggle-hint { font-size: 10px; color: var(--muted); margin: -6px 0 10px 26px; }
+
+/* ── Select ── */
+.ctrl-row { margin-bottom: 12px; }
+.ctrl-row label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.ctrl-row select {
+  width: 100%;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236868a0' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+/* ── Legend dots ── */
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.ldot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Terrain note ── */
+.terrain-note { font-size: 11px; color: var(--muted); line-height: 1.6; }
+
+/* ── Count ── */
+#showing-count { font-size: 11px; color: var(--muted); margin-top: 10px; text-align: center; }
+
+/* ── Back link ── */
+.back-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 14px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  transition: color .2s, border-color .2s;
+  text-decoration: none;
+}
+.back-link:hover { color: var(--gold); border-color: var(--gold); }
+
+/* ── Map ── */
+#map { flex: 1; z-index: 1; }
+
+/* ── Popups ── */
+.lpop {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  min-width: 260px;
+  max-width: min(340px, 90vw);
+}
+.lpop-title { font-size: 14px; font-weight: 700; color: #2b1a00; margin-bottom: 3px; }
+.lpop-coords {
+  font-size: 11px;
+  color: #666;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lpop-coords a { color: #555; }
+.lpop-scores { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.score-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 8px;
+  min-width: 76px;
+}
+.chip-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; opacity: .7; }
+.chip-val { font-size: 18px; font-weight: 800; line-height: 1.2; }
+.chip-gold  { background: #fff3cd; color: #7a4a00; border: 1px solid #d4af37; }
+.chip-opp   { background: #fde8d8; color: #7a2b00; border: 1px solid #e67e22; }
+.chip-new   { background: #f0f0ff; color: #333; border: 1px solid #aaa; }
+.lpop-section { margin-top: 9px; }
+.lpop-section-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #8b5e00;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 2px;
+  margin-bottom: 5px;
+}
+.lpop-text { font-size: 12px; color: #333; line-height: 1.55; }
+.lpop-text strong { color: #5a2a00; }
+.lpop-geo  { font-size: 11px; color: #555; font-style: italic; margin-top: 3px; }
+.access-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+.a0 { background:#ffcccc;color:#7a0000; }
+.a1 { background:#ffe0b2;color:#5a2d00; }
+.a2 { background:#fff9c4;color:#4a3c00; }
+.a3 { background:#c8e6c9;color:#1b4a20; }
+.a4 { background:#b3e0ff;color:#003a6b; }
+.prob-bar-wrap { height:6px;border-radius:3px;background:#e0e0e0;margin-top:6px;overflow:hidden; }
+.prob-bar-fill { height:100%;border-radius:3px; }
+.lpop-copy-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  cursor: pointer;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.28); }
+.leaflet-popup-content { margin: 14px 16px; }
+
+/* ── Mobile overrides ── */
+@media (max-width: 700px) {
+  :root { --panel-w: 280px; }
+
+  /* panel becomes a drawer that slides over the map */
+  #panel {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    transform: translateX(-110%);
+  }
+  #panel.open {
+    transform: translateX(0);
+  }
+  #panel-toggle { display: none; }
+  #panel-overlay.open { display: block; }
+  #menu-btn { display: block; }
+
+  /* hide verbose badges on small screens */
+  .badge-hide-mobile { display: none !important; }
+
+  .stat-badges { gap: 4px; }
+  .badge-stat { padding: 3px 7px; font-size: 10px; }
+
+  #header h1 { font-size: 14px; }
+}
+
+@media (max-width: 400px) {
+  :root { --panel-w: 100vw; }
+}
+
+/* landscape phone — allow panel-toggle on left edge */
+@media (max-height: 500px) and (orientation: landscape) {
+  #header { height: 44px; }
+  #header h1 { font-size: 13px; }
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <a id="header-logo" href="netherlayer.html" title="About Netherlayer">
+    <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
+      <polygon points="11,1 14,8 21,8.5 16,13.5 17.5,21 11,17 4.5,21 6,13.5 1,8.5 8,8"
+               fill="#d4af37" opacity=".9"/>
+    </svg>
+  </a>
+  <div>
+    <h1>21st Century Goldfields</h1>
+    <div class="sub">Netherlayer · QLD Gold Prospectivity</div>
+  </div>
+  <div class="stat-badges" id="stat-badges">
+    <div class="badge-stat">Loading…</div>
+  </div>
+  <button id="menu-btn" aria-label="Open layers panel">☰</button>
+</div>
+
+<div id="app">
+  <div id="panel-overlay" id="panel-overlay"></div>
+
+  <div id="panel">
+    <div id="panel-inner">
+
+      <a href="netherlayer.html" class="back-link">← About Netherlayer</a>
+
+      <div class="sec-head">Base Map</div>
+      <div class="ctrl-row">
+        <select id="basemap-select">
+          <option value="osm">OpenStreetMap — Streets</option>
+          <option value="topo" selected>OpenTopoMap — Terrain</option>
+          <option value="satellite">ESRI Satellite</option>
+          <option value="dark">CartoDB Dark</option>
+        </select>
+      </div>
+
+      <div class="sec-head">Layers</div>
+      <label class="toggle-row">
+        <input type="checkbox" id="show-gold-locs" checked/>
+        <span>Known Gold Locations</span>
+      </label>
+      <div class="toggle-hint">21,403 sites — KMZ, MINOCC, leases, claims</div>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="show-new" checked/>
+        <span>New Prospects (&gt;60% ML score)</span>
+      </label>
+      <div class="toggle-hint">862 locations — ensemble model, precision-tuned</div>
+
+      <div class="sec-head">Legend</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Known Gold</div>
+      <div class="legend-item"><div class="ldot" style="background:#ffd700;border:2px solid #8b6914"></div>KMZ waypoint (abandoned mine)</div>
+      <div class="legend-item"><div class="ldot" style="background:#ffa500;border:2px solid #7a4a00"></div>MINOCC occurrence (QLD Govt)</div>
+      <div class="legend-item"><div class="ldot" style="background:#ff8c00;border:2px solid #7a3c00"></div>Historic / dead lease or claim</div>
+      <div class="legend-item"><div class="ldot" style="background:#ff4444;border:2px solid #8b0000"></div>User-identified (QGlobe verified)</div>
+      <div style="font-size:10px;color:var(--muted);margin:10px 0 6px;text-transform:uppercase;letter-spacing:1px">New Prospects — Opportunity</div>
+      <div class="legend-item"><div class="ldot" style="background:#f1c40f"></div>Low–moderate</div>
+      <div class="legend-item"><div class="ldot" style="background:#e67e22"></div>Good</div>
+      <div class="legend-item"><div class="ldot" style="background:#e74c3c"></div>Strong</div>
+      <div class="legend-item"><div class="ldot" style="background:#8e1b1b"></div>Highest priority</div>
+
+      <div class="sec-head">Terrain Guide</div>
+      <div class="terrain-note">
+        <strong style="color:var(--text)">Road distance</strong> proxies exploration history.
+        Ground &gt;5 km from a mapped road is rarely prospected systematically.<br><br>
+        Use <strong style="color:var(--text)">Terrain</strong> or <strong style="color:var(--text)">Satellite</strong> layers to judge steepness and vegetation.
+      </div>
+
+      <div id="showing-count"></div>
+    </div>
+  </div>
+
+  <button id="panel-toggle" title="Toggle panel">&#9664;</button>
+  <div id="map"></div>
+</div>
+
+<script src="prospects_map_data.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<script>
+// ── Base layers ──
+const baseLayers = {
+  osm:       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+               { attribution:'&copy; OpenStreetMap contributors', maxZoom:19 }),
+  topo:      L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+               { attribution:'&copy; OpenTopoMap', maxZoom:17 }),
+  satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+               { attribution:'&copy; Esri', maxZoom:19 }),
+  dark:      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+               { attribution:'&copy; CartoDB', maxZoom:19 }),
+};
+
+const isMobile = () => window.innerWidth <= 700;
+
+const map = L.map('map', {
+  center: [-20.0, 144.5],
+  zoom: 6,
+  layers: [baseLayers.topo],
+  zoomControl: true,
+  tap: true,
+});
+
+// Move zoom control away from panel on desktop
+if (!isMobile()) {
+  map.zoomControl.setPosition('topright');
+}
+
+// ── Colour helpers ──
+function oppColor(s) {
+  if (s >= 88) return '#8e1b1b';
+  if (s >= 75) return '#e74c3c';
+  if (s >= 60) return '#e67e22';
+  return '#f1c40f';
+}
+function oppBorder(s) {
+  if (s >= 88) return '#5a0a0a';
+  if (s >= 75) return '#922b21';
+  if (s >= 60) return '#935116';
+  return '#9a7d0a';
+}
+
+function circleIcon(score) {
+  const c = oppColor(score), b = oppBorder(score);
+  const sz = isMobile() ? 16 : 14;
+  return L.divIcon({
+    html: `<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:${c};border:2px solid ${b};box-shadow:0 1px 5px rgba(0,0,0,.55)"></div>`,
+    iconSize: [sz,sz], iconAnchor: [sz/2,sz/2], popupAnchor: [0,-sz/2-2], className:''
+  });
+}
+
+// ── Access tier ──
+function accessClass(d) {
+  if (d < 0.5)  return 0;
+  if (d < 2.0)  return 1;
+  if (d < 5.0)  return 2;
+  if (d < 10.0) return 3;
+  return 4;
+}
+function accessLabel(d) {
+  return ['Roadside','Short walk','Moderate hike','Remote','Very remote'][accessClass(d)] || 'Extremely remote';
+}
+const acLabels = [
+  'Roadside — easily explored',
+  'Short walk — likely prospected before',
+  'Moderate hike — possibly prospected',
+  'Remote — unlikely systematically prospected',
+  'Very/extremely remote — rarely accessed',
+];
+
+// ── Popup builder (new prospects) ──
+function buildPopup(f) {
+  const geoText = [f.geology, f.surface_geo, f.solid_geo].filter(v => v && v !== 'nan').join(' / ') || 'Not described';
+  const rcLabel = {
+    igneous:     '🔥 Igneous host',
+    metamorphic: '💎 Metamorphic host',
+    sedimentary: '🏜️ Sedimentary host',
+    ultramafic:  '⚡ Ultramafic host',
+    unknown:     'Rock class unresolved',
+  }[f.rock_class || 'unknown'] || f.rock_class;
+
+  const ac  = accessClass(f.dist_road);
+  const col = oppColor(f.opp_score);
+  const googleLink = `https://www.google.com/maps?q=${f.lat},${f.lon}`;
+  const osmLink    = `https://www.openstreetmap.org/?mlat=${f.lat}&mlon=${f.lon}&zoom=14`;
+  const cid = `cp${Math.random().toString(36).slice(2)}`;
+
+  return `<div class="lpop">
+  <div class="lpop-title">${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}</div>
+  <div class="lpop-coords">
+    <a href="${googleLink}" target="_blank">Google Maps</a>
+    &nbsp;·&nbsp;<a href="${osmLink}" target="_blank">OSM</a>
+    <button id="${cid}" class="lpop-copy-btn"
+      onclick="navigator.clipboard&&navigator.clipboard.writeText('${f.lat.toFixed(6)},${f.lon.toFixed(6)}').then(()=>{document.getElementById('${cid}').textContent='✓'})">Copy</button>
+  </div>
+  <div class="lpop-scores">
+    <div class="score-chip chip-gold">
+      <span class="chip-lbl">Gold Prob</span>
+      <span class="chip-val">${f.gold_prob}%</span>
+    </div>
+    <div class="score-chip chip-opp">
+      <span class="chip-lbl">Opportunity</span>
+      <span class="chip-val">${f.opp_score}</span>
+    </div>
+    <div class="score-chip chip-new">
+      <span class="chip-lbl">Status</span>
+      <span class="chip-val" style="font-size:12px">New Site</span>
+    </div>
+  </div>
+  <div class="prob-bar-wrap"><div class="prob-bar-fill" style="width:${Math.min(100,f.opp_score)}%;background:${col}"></div></div>
+
+  <div class="lpop-section">
+    <div class="lpop-section-head">Why it scores</div>
+    <div class="lpop-text">${f.why}</div>
+  </div>
+  <div class="lpop-section">
+    <div class="lpop-section-head">Geology</div>
+    <div class="lpop-text"><strong>${rcLabel}</strong></div>
+    <div class="lpop-geo">${geoText}</div>
+    <div class="lpop-text" style="margin-top:4px">${f.terrain}</div>
+  </div>
+  <div class="lpop-section">
+    <div class="lpop-section-head">Proximity</div>
+    <div class="lpop-text">
+      🟥 Fault: <strong>${f.dist_fault} km</strong> &nbsp;
+      🟣 Vein/dyke: <strong>${f.dist_vein} km</strong><br>
+      🔵 Water: <strong>${f.dist_water} km</strong> &nbsp;
+      🟨 Road: <strong>${f.dist_road} km</strong>
+    </div>
+  </div>
+  <div class="lpop-section">
+    <div class="lpop-section-head">Access</div>
+    <span class="access-pill a${ac}">${accessLabel(f.dist_road)}</span>
+    <div class="lpop-text" style="margin-top:5px">${acLabels[Math.min(ac,4)]}</div>
+  </div>
+</div>`;
+}
+
+// ── Gold locations layer ──
+function goldLocIcon(src) {
+  const colors = {
+    KMZ:['#ffd700','#8b6914'], MINOCC:['#ffa500','#7a4a00'],
+    Manual:['#ff4444','#8b0000'], HistLease:['#ff8c00','#7a3c00'],
+    DeadLease:['#ff8c00','#7a3c00'], DeadClaim:['#ff8c00','#7a3c00'],
+    MDL:['#ff8c00','#7a3c00'],
+  };
+  const [bg,bd] = colors[src] || ['#ff8c00','#7a3c00'];
+  const sz = isMobile() ? 11 : 9;
+  return L.divIcon({
+    html: `<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:${bg};border:1.5px solid ${bd};box-shadow:0 1px 4px rgba(0,0,0,.5)"></div>`,
+    iconSize:[sz,sz], iconAnchor:[sz/2,sz/2], popupAnchor:[0,-sz/2-2], className:''
+  });
+}
+
+const SOURCE_LABELS = {
+  KMZ:'KMZ waypoint (abandoned mine / deposit)',
+  MINOCC:'QLD Govt MINOCC mineral occurrence',
+  Manual:'User-identified (confirmed in QGlobe)',
+  HistLease:'Historic mining lease', DeadLease:'Dead mining lease',
+  DeadClaim:'Dead mining claim', MDL:'Mineral development licence',
+};
+
+let goldLocsLayer = L.markerClusterGroup({
+  maxClusterRadius: 28,
+  disableClusteringAtZoom: 14,
+  iconCreateFunction(cluster) {
+    const n = cluster.getChildCount();
+    const sz = n > 100 ? 30 : n > 20 ? 24 : 18;
+    return L.divIcon({
+      html:`<div style="background:#ffd700cc;border:1.5px solid #8b6914;border-radius:50%;width:${sz}px;height:${sz}px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#3a2800">${n}</div>`,
+      className:'', iconSize:null
+    });
+  }
+});
+
+function buildGoldLocPopup(loc) {
+  const googleLink = `https://www.google.com/maps?q=${loc.lat},${loc.lon}`;
+  const src = SOURCE_LABELS[loc.s] || loc.s;
+  const name = loc.n || '(unnamed)';
+  const cid = `cp${Math.random().toString(36).slice(2)}`;
+  return `<div class="lpop" style="min-width:200px">
+  <div class="lpop-title" style="color:#7a4a00">${name}</div>
+  <div class="lpop-coords">
+    <a href="${googleLink}" target="_blank">${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}</a>
+    <button id="${cid}" class="lpop-copy-btn"
+      onclick="navigator.clipboard&&navigator.clipboard.writeText('${loc.lat.toFixed(6)},${loc.lon.toFixed(6)}').then(()=>{document.getElementById('${cid}').textContent='✓'})">Copy</button>
+  </div>
+  <div style="margin-top:8px;font-size:12px;color:#555">${src}</div>
+</div>`;
+}
+
+function rebuildGoldLocsLayer() {
+  goldLocsLayer.clearLayers();
+  if (typeof GOLD_LOCS === 'undefined') return;
+  if (!document.getElementById('show-gold-locs').checked) return;
+  const maxW = Math.min(300, window.innerWidth - 40);
+  for (const loc of GOLD_LOCS) {
+    goldLocsLayer.addLayer(
+      L.marker([loc.lat, loc.lon], { icon: goldLocIcon(loc.s) })
+        .bindPopup(buildGoldLocPopup(loc), { maxWidth: maxW })
+    );
+  }
+  map.addLayer(goldLocsLayer);
+}
+
+// ── New prospects layer ──
+let newLayer = L.markerClusterGroup({ maxClusterRadius: 38, disableClusteringAtZoom: 13 });
+
+function rebuildLayers() {
+  newLayer.clearLayers();
+  if (typeof MAP_DATA === 'undefined') return;
+  const maxW = Math.min(360, window.innerWidth - 32);
+  let shown = 0;
+  for (const feat of MAP_DATA.features) {
+    newLayer.addLayer(
+      L.marker([feat.lat, feat.lon], { icon: circleIcon(feat.opp_score) })
+        .bindPopup(buildPopup(feat), { maxWidth: maxW })
+    );
+    shown++;
+  }
+  if (document.getElementById('show-new').checked) map.addLayer(newLayer);
+  document.getElementById('showing-count').textContent = `${shown.toLocaleString()} new prospects shown`;
+}
+
+// ── Basemap ──
+let currentBase = baseLayers.topo;
+document.getElementById('basemap-select').addEventListener('change', e => {
+  map.removeLayer(currentBase);
+  currentBase = baseLayers[e.target.value];
+  currentBase.addTo(map);
+  currentBase.bringToBack();
+});
+
+// ── Desktop panel toggle ──
+const panel = document.getElementById('panel');
+const toggleBtn = document.getElementById('panel-toggle');
+toggleBtn.addEventListener('click', () => {
+  panel.classList.toggle('collapsed');
+  toggleBtn.innerHTML = panel.classList.contains('collapsed') ? '&#9654;' : '&#9664;';
+  setTimeout(() => map.invalidateSize(), 260);
+});
+
+// ── Mobile drawer ──
+const overlay = document.getElementById('panel-overlay');
+const menuBtn = document.getElementById('menu-btn');
+menuBtn.addEventListener('click', () => {
+  panel.classList.toggle('open');
+  overlay.classList.toggle('open');
+  map.invalidateSize();
+});
+overlay.addEventListener('click', () => {
+  panel.classList.remove('open');
+  overlay.classList.remove('open');
+  map.invalidateSize();
+});
+
+// ── Layer toggles ──
+document.getElementById('show-new').addEventListener('change', e => {
+  if (e.target.checked) map.addLayer(newLayer);
+  else map.removeLayer(newLayer);
+});
+document.getElementById('show-gold-locs').addEventListener('change', e => {
+  if (e.target.checked) rebuildGoldLocsLayer();
+  else map.removeLayer(goldLocsLayer);
+});
+
+// ── Stat badges ──
+function renderStats() {
+  const s = MAP_DATA.stats;
+  const gc = typeof GOLD_LOCS !== 'undefined' ? GOLD_LOCS.length : 0;
+  document.getElementById('stat-badges').innerHTML = `
+    <div class="badge-stat">Known: <strong>${gc.toLocaleString()}</strong></div>
+    <div class="badge-stat badge-hide-mobile">New &gt;60%: <strong>${s.new_prospects.toLocaleString()}</strong></div>
+    <div class="badge-stat badge-hide-mobile">Remote: <strong>${s.remote_count.toLocaleString()}</strong></div>
+    <div class="badge-stat">Top: <strong>${s.prob_max}%</strong></div>
+  `;
+}
+
+// ── Resize: update popup maxWidth ──
+window.addEventListener('resize', () => {
+  map.invalidateSize();
+  if (isMobile()) {
+    // on rotate close panel
+    panel.classList.remove('open');
+    overlay.classList.remove('open');
+  }
+});
+
+// ── Init ──
+if (typeof MAP_DATA === 'undefined') {
+  document.getElementById('stat-badges').innerHTML =
+    '<div class="badge-stat" style="color:#e74c3c">Error: prospects_map_data.js not loaded</div>';
+} else {
+  renderStats();
+
+  // Auto-collapse panel on mobile at start
+  if (isMobile()) {
+    // panel starts collapsed (no class = off-screen via CSS transform)
+  }
+
+  rebuildLayers();
+  if (typeof GOLD_LOCS !== 'undefined') rebuildGoldLocsLayer();
+
+  // Fit bounds
+  const lats = MAP_DATA.features.map(f => f.lat);
+  const lons = MAP_DATA.features.map(f => f.lon);
+  if (lats.length) {
+    map.fitBounds(
+      [[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]],
+      { padding: [20, 20] }
+    );
+  }
+}
+</script>
+</body>
+</html>
