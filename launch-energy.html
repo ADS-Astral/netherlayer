@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Launch Energy Calculator</title>
+<style>
+/* ─── Design tokens (shared with Netherlayer) ─── */
+:root {
+  --bg:       #0e0e1c;
+  --surface:  #0e0e1c;
+  --raised:   #13132a;
+  --sh-dark:  #07070f;
+  --sh-light: #191933;
+  --gold:     #d4af37;
+  --gold2:    #f0c040;
+  --gold3:    #7a5c00;
+  --text:     #d8d8f0;
+  --muted:    #7070a0;
+  --green:    #2ecc71;
+  --red:      #e74c3c;
+  --radius:   16px;
+  --gap:      clamp(16px, 3vw, 32px);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.6;
+  padding: var(--gap);
+  display: flex;
+  justify-content: center;
+}
+.wrap { width: 100%; max-width: 760px; }
+
+.nm-raised {
+  background: var(--surface);
+  box-shadow: 8px 8px 20px var(--sh-dark), -8px -8px 20px var(--sh-light);
+  border-radius: var(--radius);
+}
+.nm-inset {
+  background: var(--surface);
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+  border-radius: 12px;
+}
+
+header { text-align: center; margin-bottom: var(--gap); }
+h1 { font-size: clamp(1.5rem, 4vw, 2.2rem); color: var(--gold); letter-spacing: .02em; }
+header p { color: var(--muted); font-size: .95rem; }
+
+.panel { padding: var(--gap); margin-bottom: var(--gap); }
+.panel > h2 {
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--gold); margin-bottom: 18px; font-weight: 600;
+}
+.field { margin-bottom: 20px; }
+.field:last-child { margin-bottom: 0; }
+label {
+  display: block; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin-bottom: 8px;
+}
+.sym { text-transform: none; }
+.row { display: flex; gap: 10px; }
+.row > input { flex: 1 1 auto; min-width: 0; }
+.row > select { flex: 0 0 clamp(84px, 24%, 120px); }
+.row > .unit-tag {
+  flex: 0 0 clamp(84px, 24%, 120px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .88rem; color: var(--muted); border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+}
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; }
+
+input, select {
+  width: 100%; padding: 12px 14px; font: inherit; font-size: 1rem;
+  color: var(--text); background: var(--surface); border: none; border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+  outline: none; appearance: none;
+}
+input:focus, select:focus { box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light), 0 0 0 2px var(--gold3); }
+input.invalid { color: var(--red); }
+input:disabled { color: var(--muted); cursor: not-allowed; opacity: .75; }
+select {
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 34px;
+}
+select option, select optgroup { background: var(--raised); color: var(--text); }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+.hint { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+
+details.adv { margin-bottom: var(--gap); }
+details.adv > summary {
+  cursor: pointer; padding: 14px var(--gap); list-style: none;
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .1em; color: var(--gold);
+}
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary::after { content: ' ▾'; color: var(--muted); }
+details.adv[open] > summary::after { content: ' ▴'; }
+details.adv > .panel { margin-bottom: 0; padding-top: 4px; box-shadow: none; }
+
+/* ─── Results ─── */
+.result { padding: var(--gap); text-align: center; }
+.result .primary {
+  font-size: clamp(1.6rem, 6vw, 2.4rem); color: var(--gold);
+  font-variant-numeric: tabular-nums; word-break: break-all;
+}
+.result .primary .unit { color: var(--muted); font-size: .55em; margin-left: .3em; }
+.result .secondary { margin-top: 6px; color: var(--green); font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.result .error { color: var(--red); font-size: 1rem; display: block; margin-top: 8px; }
+.result .caption { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
+
+.split { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--sh-light); }
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 14px; text-align: left;
+}
+.stats div > span { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.stats div b { font-weight: 600; font-variant-numeric: tabular-nums; font-size: .95rem; }
+
+table.budget { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: .9rem; }
+table.budget th {
+  text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); font-weight: 600; padding: 6px 8px;
+}
+table.budget td { padding: 6px 8px; border-top: 1px solid var(--sh-light); font-variant-numeric: tabular-nums; }
+table.budget td:last-child, table.budget th:last-child { text-align: right; }
+table.budget tr.total td { border-top: 2px solid var(--sh-light); color: var(--gold2); font-weight: 600; }
+table.budget tr.credit td { color: var(--green); }
+.scroll-x { overflow-x: auto; }
+
+footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: var(--gap); }
+footer p { margin-bottom: 6px; }
+footer a { color: var(--gold); text-decoration: none; }
+footer a:hover { color: var(--gold2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Launch Energy</h1>
+    <p>Energy needed to put a mass into orbit — including the atmosphere it has to climb through.</p>
+  </header>
+
+  <section class="panel nm-raised">
+    <div class="grid2">
+      <div class="field">
+        <label for="mass">Payload mass</label>
+        <div class="row">
+          <input type="number" id="mass" value="1000" min="0" step="any" inputmode="decimal"/>
+          <select id="massUnit">
+            <option value="1" selected>kg</option>
+            <option value="1000">tonne</option>
+            <option value="0.45359237">lb</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="dest">Destination</label>
+        <select id="dest"><!-- populated by script --></select>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="alt">Altitude</label>
+        <div class="row">
+          <input type="number" id="alt" value="400" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">km</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="mode">Mission</label>
+        <select id="mode">
+          <option value="orbit" selected>Circular orbit at that altitude</option>
+          <option value="apogee">Reach altitude only (suborbital)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="lat">Launch latitude — eastward launch takes a free ride from Earth’s spin</label>
+      <div class="row">
+        <input type="number" id="lat" value="28.5" min="0" max="90" step="any" inputmode="decimal"/>
+        <div class="unit-tag">° N/S</div>
+      </div>
+      <p class="hint" id="latHint">&nbsp;</p>
+    </div>
+  </section>
+
+  <details class="adv nm-raised">
+    <summary>Vehicle assumptions</summary>
+    <div class="panel">
+      <div class="grid2">
+        <div class="field">
+          <label for="isp">Effective specific impulse <span class="sym">(Iₛₚ)</span></label>
+          <div class="row">
+            <input type="number" id="isp" value="330" min="0" step="any" inputmode="decimal"/>
+            <div class="unit-tag">s</div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="prop">Propellant</label>
+          <select id="prop"><!-- populated by script --></select>
+          <p class="hint">Sets a typical Iₛₚ — override it on the left if you know better.</p>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="stages">Stages</label>
+          <select id="stages">
+            <option value="1">1 — single stage to orbit</option>
+            <option value="2" selected>2 — conventional</option>
+            <option value="3">3 — heavy / high energy</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="sigma">Structural coefficient <span class="sym">(σ)</span></label>
+          <input type="number" id="sigma" value="0.08" min="0.01" max="0.5" step="any" inputmode="decimal"/>
+          <p class="hint">Dry mass ÷ stage mass. 0.06–0.10 is typical.</p>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="diaMode">Vehicle diameter</label>
+          <div class="row">
+            <input type="number" id="dia" value="3.7" min="0" step="any" inputmode="decimal"/>
+            <select id="diaMode">
+              <option value="auto" selected>auto</option>
+              <option value="manual">m (set)</option>
+            </select>
+          </div>
+          <p class="hint" id="diaHint">Scaled from liftoff mass at a typical slenderness.</p>
+        </div>
+        <div class="field">
+          <label for="cd">Drag coefficient <span class="sym">(C<sub>d</sub>)</span></label>
+          <input type="number" id="cd" value="0.4" min="0" step="any" inputmode="decimal"/>
+        </div>
+      </div>
+      <div class="field">
+        <label for="twr">Liftoff thrust-to-weight</label>
+        <input type="number" id="twr" value="1.35" min="1.01" step="any" inputmode="decimal"/>
+        <p class="hint">Higher climbs faster (less gravity loss) but hits denser air harder (more drag).</p>
+      </div>
+    </div>
+  </details>
+
+  <section class="panel result nm-raised">
+    <div class="caption">Total energy required</div>
+    <div class="primary" id="out">—</div>
+    <div class="secondary" id="outAlt">&nbsp;</div>
+    <div id="outErr"></div>
+
+    <div class="split">
+      <div class="stats">
+        <div><span>Useful energy in payload</span><b id="sMech">—</b></div>
+        <div><span>Energy per kg of payload</span><b id="sPerKg">—</b></div>
+        <div><span>Overall efficiency</span><b id="sEff">—</b></div>
+        <div><span>Work against drag</span><b id="sDrag">—</b></div>
+        <div><span>Propellant mass</span><b id="sProp">—</b></div>
+        <div><span>Liftoff mass</span><b id="sGlom">—</b></div>
+        <div><span>Max dynamic pressure</span><b id="sMaxQ">—</b></div>
+        <div><span>Payload fraction</span><b id="sFrac">—</b></div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="caption" style="text-align:left">Δv budget</div>
+      <div class="scroll-x">
+        <table class="budget">
+          <thead><tr><th>Contribution</th><th>Δv</th></tr></thead>
+          <tbody id="budget"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Drag is integrated step by step along a modelled ascent through the 1976 US
+       Standard Atmosphere, so it responds to air density, vehicle size and how fast
+       the vehicle is moving at each altitude — not a fixed allowance.</p>
+    <p>A preliminary-design estimate. Real vehicles differ with staging, throttling,
+       trajectory shaping and engine performance that varies with altitude.</p>
+    <p><a href="index.html">← Netherlayer</a> · <a href="capacitor.html">Capacitance calculator</a></p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ─── Constants ─── */
+  const GM   = 3.986004418e14;   // m³/s², Earth gravitational parameter
+  const R_E  = 6371000;          // m, mean Earth radius
+  const OMEGA = 7.2921159e-5;    // rad/s, Earth rotation
+  const G0   = 9.80665;          // m/s²
+  const KWH  = 3.6e6;            // J per kWh
+  const WH   = 3600;             // J per Wh
+  const R_PARK = R_E + 200000;   // m, parking orbit for high-orbit transfers
+
+  /* 1976 US Standard Atmosphere as piecewise exponentials:
+     [base altitude km, density at that base kg/m³, scale height km].
+     ρ(h) = ρ₀·exp(−(h − h₀)/H) — accurate to a few percent to 1000 km. */
+  const ATMO = [
+    [0, 1.225, 7.249], [25, 3.899e-2, 6.349], [30, 1.774e-2, 6.682],
+    [40, 3.972e-3, 7.554], [50, 1.057e-3, 8.382], [60, 3.206e-4, 7.714],
+    [70, 8.770e-5, 6.549], [80, 1.905e-5, 5.799], [90, 3.396e-6, 5.382],
+    [100, 5.297e-7, 5.877], [110, 9.661e-8, 7.263], [120, 2.438e-8, 9.473],
+    [130, 8.484e-9, 12.636], [140, 3.845e-9, 16.149], [150, 2.070e-9, 22.523],
+    [180, 5.464e-10, 29.740], [200, 2.789e-10, 37.105], [250, 7.248e-11, 45.546],
+    [300, 2.418e-11, 53.628], [350, 9.518e-12, 53.298], [400, 3.725e-12, 58.515],
+    [450, 1.585e-12, 60.828], [500, 6.967e-13, 63.822], [600, 1.454e-13, 71.835],
+    [700, 3.614e-14, 88.667], [800, 1.170e-14, 124.64], [900, 5.245e-15, 181.05],
+    [1000, 3.019e-15, 268.00]
+  ];
+
+  function density(h) {
+    const km = h / 1000;
+    if (km < 0) return ATMO[0][1];
+    if (km > 1100) return 0;
+    let band = ATMO[0];
+    for (let i = 0; i < ATMO.length; i++) if (km >= ATMO[i][0]) band = ATMO[i];
+    return band[1] * Math.exp(-(km - band[0]) / band[2]);
+  }
+
+  /* Pitch program: flight path angle above the horizon as a function of altitude.
+     Anchored to the shape a medium launcher actually flies — vertical off the pad,
+     progressively pitched over so it is nearly horizontal leaving the atmosphere.
+     Prescribing it (rather than solving a guidance problem) keeps the model stable. */
+  const PITCH = [[0, 90], [1, 90], [3, 80], [8, 65], [15, 52], [25, 42],
+                 [40, 33], [60, 25], [80, 18], [100, 13], [130, 7]];
+
+  function pitchAngle(h) {
+    const km = h / 1000;
+    if (km <= PITCH[0][0]) return PITCH[0][1] * Math.PI / 180;
+    for (let i = 1; i < PITCH.length; i++) {
+      if (km <= PITCH[i][0]) {
+        const [h0, g0d] = PITCH[i - 1], [h1, g1d] = PITCH[i];
+        const f = (km - h0) / (h1 - h0);
+        return (g0d + f * (g1d - g0d)) * Math.PI / 180;
+      }
+    }
+    return PITCH[PITCH.length - 1][1] * Math.PI / 180;
+  }
+
+  const $ = id => document.getElementById(id);
+  const els = {};
+  ['mass','massUnit','dest','alt','mode','lat','latHint','isp','prop','stages','sigma',
+   'dia','diaMode','diaHint','cd','twr','out','outAlt','outErr','sMech','sPerKg','sEff','sDrag','sProp',
+   'sGlom','sMaxQ','sFrac','budget'].forEach(id => { els[id] = $(id); });
+
+  /* Chemical energy per kg of propellant mixture, with the specific impulse that
+     propellant realistically delivers. The two travel together — comparing energy
+     density while holding Iₛₚ fixed makes a solid motor look better than hydrogen,
+     which is backwards. */
+  const PROPELLANTS = [
+    { name: 'Kerolox (RP-1 / LOX)', mj: 10.3, isp: 330 },
+    { name: 'Methalox (CH₄ / LOX)', mj: 10.9, isp: 350 },
+    { name: 'Hydrolox (LH₂ / LOX)', mj: 13.4, isp: 430 },
+    { name: 'Solid (APCP)', mj: 5.6, isp: 265 },
+    { name: 'Hypergolic (UDMH / N₂O₄)', mj: 6.4, isp: 320 }
+  ];
+  PROPELLANTS.forEach((f, i) =>
+    els.prop.add(new Option(`${f.name} — ${f.mj} MJ/kg, Iₛₚ ${f.isp} s`, String(i))));
+  els.prop.value = '0';
+
+  /* ─── Destinations ─── */
+  const DESTS = [
+    { name: 'Custom altitude', alt: null, mode: null },
+    { name: 'Kármán line — 100 km (edge of space)', alt: 100, mode: 'apogee' },
+    { name: 'Very low LEO — 200 km', alt: 200, mode: 'orbit' },
+    { name: 'LEO / ISS — 420 km', alt: 420, mode: 'orbit' },
+    { name: 'Sun-synchronous LEO — 800 km', alt: 800, mode: 'orbit' },
+    { name: 'Upper LEO — 2,000 km', alt: 2000, mode: 'orbit' },
+    { name: 'MEO / GPS — 20,200 km', alt: 20200, mode: 'orbit' },
+    { name: 'GEO / High Earth orbit — 35,786 km', alt: 35786, mode: 'orbit' }
+  ];
+  DESTS.forEach((d, i) => els.dest.add(new Option(d.name, String(i))));
+  els.dest.value = '3';
+
+  /* ─── Formatting ─── */
+  const sig = (x, n = 4) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return '0';
+    const s = x.toPrecision(n);
+    if (s.includes('e')) return Number(s).toString();
+    return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
+  };
+  const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+  const sci = (x, n = 5) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return '0';
+    const exp = Math.floor(Math.log10(Math.abs(x)));
+    const mant = x / Math.pow(10, exp);
+    return `${mant.toPrecision(n)} × 10${String(exp).split('').map(c => SUP[c]).join('')}`;
+  };
+  const PRE = [[1e15, 'P'], [1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm']];
+  const eng = (x, unit) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return `0 ${unit}`;
+    const [s, p] = PRE.find(([s]) => Math.abs(x) >= s) || PRE[PRE.length - 1];
+    return `${sig(x / s, 4)} ${p}${unit}`;
+  };
+  const mass = kg => kg >= 1e6 ? `${sig(kg / 1e6, 4)} kt` : kg >= 1000 ? `${sig(kg / 1000, 4)} t` : `${sig(kg, 4)} kg`;
+
+  /* ─── Mission energy and Δv ─── */
+  // Energy-equivalent Δv to raise a unit mass from rest at the surface.
+  const dvEnergy = r => Math.sqrt(2 * GM * (1 / R_E - 1 / (2 * r)));
+
+  // Two-burn Hohmann transfer between circular orbits.
+  function hohmann(r1, r2) {
+    const a = (r1 + r2) / 2;
+    const dv1 = Math.sqrt(GM * (2 / r1 - 1 / a)) - Math.sqrt(GM / r1);
+    const dv2 = Math.sqrt(GM / r2) - Math.sqrt(GM * (2 / r2 - 1 / a));
+    return dv1 + dv2;
+  }
+
+  /* Specific mechanical energy actually delivered to the payload, relative to
+     rest at the surface. Path-independent — drag and gravity losses cost
+     propellant, they do not change where the payload ends up. */
+  function specificEnergy(r, mode) {
+    return mode === 'orbit'
+      ? GM * (1 / R_E - 1 / (2 * r))   // potential gain + orbital kinetic
+      : GM * (1 / R_E - 1 / r);        // potential gain only, at rest at apogee
+  }
+
+  function idealDv(r, mode) {
+    if (mode === 'apogee') return Math.sqrt(2 * GM * (1 / R_E - 1 / r));
+    // Low targets are reached directly; high ones stage through a parking orbit,
+    // because a Hohmann transfer costs more Δv than the energy change alone.
+    if (r <= R_PARK) return dvEnergy(r);
+    return dvEnergy(R_PARK) + hohmann(R_PARK, r);
+  }
+
+  /* A launch vehicle is roughly a constant-density cylinder about twelve calibres
+     long, so frontal area follows from liftoff mass. Falcon-9-class mass lands on
+     3.9 m against a real 3.7 m. Without this, a small vehicle keeps a large
+     vehicle's diameter and the model drowns it in drag it would never see. */
+  const VEHICLE_DENSITY = 1000;   // kg/m³, propellant-dominated average
+  const SLENDERNESS = 12;         // length ÷ diameter
+  const vehicleDiameter = m => Math.cbrt(4 * m / (Math.PI * SLENDERNESS * VEHICLE_DENSITY));
+
+  /* ─── Vehicle sizing ─── */
+  /* Staged rocket equation with a structural coefficient, sized from the payload
+     up. Returns null when the mass ratio is unreachable — with σ = 0.08 a single
+     stage simply cannot make orbit, which the model should say rather than hide. */
+  function sizeVehicle(payload, dv, isp, stages, sigma) {
+    const ve = isp * G0;
+    const k = sigma / (1 - sigma);
+    const R = Math.exp(dv / stages / ve);
+    if (1 + k - R * k <= 0) return null;
+    let m = payload, propellant = 0;
+    for (let i = 0; i < stages; i++) {
+      const mp = m * (R - 1) / (1 + k - R * k);
+      if (!isFinite(mp) || mp <= 0) return null;
+      propellant += mp;
+      m += mp + k * mp;
+    }
+    return { glom: m, propellant };
+  }
+
+  /* ─── Ascent simulation ─── */
+  /* Integrates the climb through the atmosphere to accumulate the two losses that
+     depend on the air: work done against drag, and gravity loss from the finite
+     time spent fighting gravity. Runs until out of the atmosphere or out of
+     first-stage propellant. */
+  function ascent(glom, isp, twr, cd, area) {
+    const thrust = twr * glom * G0;
+    const mdot = thrust / (isp * G0);
+    const dt = 0.05;
+    let v = 0.1, h = 0, m = glom, t = 0;
+    let dragWork = 0, dragDv = 0, gravDv = 0, maxQ = 0, maxQalt = 0;
+
+    while (h < 130000 && t < 700 && m > glom * 0.15) {
+      const gamma = pitchAngle(h);
+      const g = GM / Math.pow(R_E + h, 2);
+      const rho = density(h);
+      const q = 0.5 * rho * v * v;
+      const drag = q * cd * area;
+      if (q > maxQ) { maxQ = q; maxQalt = h; }
+
+      const dv = (thrust / m - g * Math.sin(gamma) - drag / m) * dt;
+      dragWork += drag * v * dt;
+      dragDv += (drag / m) * dt;
+      gravDv += g * Math.sin(gamma) * dt;
+
+      v += dv;
+      if (v < 1) v = 1;
+      h += v * Math.sin(gamma) * dt;
+      m -= mdot * dt;
+      t += dt;
+    }
+    return { dragWork, dragDv, gravDv, maxQ, maxQalt, burnout: t };
+  }
+
+  /* ─── Main ─── */
+  function readPositive(el, allowZero) {
+    const v = parseFloat(el.value);
+    const ok = isFinite(v) && (allowZero ? v >= 0 : v > 0);
+    el.classList.toggle('invalid', el.value !== '' && !ok);
+    return ok ? v : NaN;
+  }
+
+  function clearOutputs(msg) {
+    els.out.textContent = '—';
+    els.outAlt.innerHTML = '&nbsp;';
+    els.outErr.innerHTML = msg ? `<span class="error">${msg}</span>` : '';
+    ['sMech','sPerKg','sEff','sDrag','sProp','sGlom','sMaxQ','sFrac'].forEach(k => { els[k].textContent = '—'; });
+    els.budget.innerHTML = '';
+  }
+
+  function update() {
+    const payload = readPositive(els.mass) * parseFloat(els.massUnit.value);
+    const altKm = readPositive(els.alt, true);
+    const lat = readPositive(els.lat, true);
+    const isp = readPositive(els.isp);
+    const sigma = readPositive(els.sigma);
+    const autoDia = els.diaMode.value === 'auto';
+    els.dia.disabled = autoDia;
+    const manualDia = autoDia ? NaN : readPositive(els.dia);
+    const cd = readPositive(els.cd);
+    const twr = readPositive(els.twr);
+    const stages = Number(els.stages.value);
+    const mode = els.mode.value;
+    const propMJ = PROPELLANTS[Number(els.prop.value)].mj;
+
+    const vRot = OMEGA * R_E * Math.cos(lat * Math.PI / 180);
+    els.latHint.textContent = isFinite(lat)
+      ? `Earth’s surface is moving ${sig(vRot, 4)} m/s eastward here — that much Δv comes free.`
+      : ' ';
+
+    const required = [payload, altKm, lat, isp, sigma, cd, twr];
+    if (!autoDia) required.push(manualDia);
+    if (required.some(x => !isFinite(x))) {
+      return clearOutputs('Fill in every field with a positive number.');
+    }
+    if (altKm <= 0) return clearOutputs('Altitude must be above the ground.');
+    if (sigma <= 0 || sigma >= 1) return clearOutputs('Structural coefficient must be between 0 and 1.');
+    if (twr <= 1) return clearOutputs('Thrust-to-weight must exceed 1 or the vehicle will not lift off.');
+
+    const r = R_E + altKm * 1000;
+    const dvIdeal = idealDv(r, mode);
+    const eSpec = specificEnergy(r, mode);
+    const eMech = eSpec * payload;
+
+    /* Drag depends on vehicle mass, which depends on Δv, which depends on drag.
+       Iterate to a fixed point — converges in a handful of passes. */
+    let sized = null, flight = null, dvTotal = dvIdeal, dvDrag = 0, dvGrav = 0, dia = manualDia;
+    const dvSteer = 0.02 * dvIdeal;   // steering/attitude losses, ~2%
+    for (let i = 0; i < 12; i++) {
+      dvTotal = dvIdeal + dvDrag + dvGrav + dvSteer - vRot;
+      if (dvTotal < 0) dvTotal = 0;
+      sized = sizeVehicle(payload, dvTotal, isp, stages, sigma);
+      if (!sized) break;
+      if (autoDia) dia = vehicleDiameter(sized.glom);
+      const area = Math.PI * Math.pow(dia / 2, 2);
+      flight = ascent(sized.glom, isp, twr, cd, area);
+      const nextDrag = flight.dragDv, nextGrav = flight.gravDv;
+      const settled = Math.abs(nextDrag - dvDrag) < 1 && Math.abs(nextGrav - dvGrav) < 1;
+      dvDrag = nextDrag; dvGrav = nextGrav;
+      if (settled) break;
+    }
+
+    if (!sized) {
+      return clearOutputs(`With ${stages} stage${stages > 1 ? 's' : ''} at σ = ${sig(sigma, 3)} and Iₛₚ = ${sig(isp, 4)} s, ` +
+        'the mass ratio needed is unreachable — the tanks would have to weigh less than nothing. Add a stage, raise Iₛₚ, or lighten the structure.');
+    }
+
+    if (autoDia) els.dia.value = sig(dia, 3);
+    els.diaHint.textContent = autoDia
+      ? `Scaled from a ${mass(sized.glom)} vehicle — ${sig(Math.PI * Math.pow(dia / 2, 2), 3)} m² of frontal area.`
+      : `${sig(Math.PI * Math.pow(dia / 2, 2), 3)} m² of frontal area.`;
+
+    const eChem = sized.propellant * propMJ * 1e6;
+    els.out.innerHTML = `${sci(eChem, 5)}<span class="unit">J</span>`;
+    els.outAlt.textContent = `= ${eng(eChem / WH, 'Wh')}   (${sig(eChem / KWH, 4)} kWh)`;
+    els.outErr.innerHTML = '';
+
+    els.sMech.textContent = `${eng(eMech, 'J')} / ${eng(eMech / WH, 'Wh')}`;
+    els.sPerKg.textContent = `${sig(eSpec / 1e6, 4)} MJ/kg  (${sig(eSpec / KWH, 3)} kWh/kg)`;
+    els.sEff.textContent = `${sig(100 * eMech / eChem, 3)} %`;
+    els.sDrag.textContent = `${eng(flight.dragWork, 'J')} / ${eng(flight.dragWork / WH, 'Wh')}`;
+    els.sProp.textContent = mass(sized.propellant);
+    els.sGlom.textContent = mass(sized.glom);
+    els.sMaxQ.textContent = `${sig(flight.maxQ / 1000, 3)} kPa at ${sig(flight.maxQalt / 1000, 3)} km`;
+    els.sFrac.textContent = `${sig(100 * payload / sized.glom, 3)} %`;
+
+    const rows = [
+      ['Ideal (energy to reach the target)', dvIdeal, ''],
+      ['Gravity loss (climbing while thrusting)', dvGrav, ''],
+      ['Drag loss (pushing through the air)', dvDrag, ''],
+      ['Steering and attitude losses', dvSteer, ''],
+      ['Earth’s rotation', -vRot, 'credit'],
+      ['Total required', dvTotal, 'total']
+    ];
+    els.budget.innerHTML = rows.map(([label, val, cls]) =>
+      `<tr class="${cls}"><td>${label}</td><td>${val < 0 ? '−' : ''}${sig(Math.abs(val), 4)} m/s</td></tr>`
+    ).join('');
+  }
+
+  /* ─── Wiring ─── */
+  els.dest.addEventListener('change', () => {
+    const d = DESTS[Number(els.dest.value)];
+    if (d.alt !== null) { els.alt.value = String(d.alt); els.mode.value = d.mode; }
+    update();
+  });
+  // Typing an altitude or changing the mission means it is no longer a listed destination.
+  [els.alt, els.mode].forEach(el => el.addEventListener('input', () => { els.dest.value = '0'; update(); }));
+  els.prop.addEventListener('change', () => {
+    els.isp.value = String(PROPELLANTS[Number(els.prop.value)].isp);
+    update();
+  });
+  ['mass','massUnit','lat','isp','stages','sigma','dia','diaMode','cd','twr']
+    .forEach(id => els[id].addEventListener('input', update));
+
+  update();
+})();
+</script>
+</body>
+</html>
