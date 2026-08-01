@@ -81,6 +81,13 @@ label {
 .row { display: flex; gap: 10px; }
 .row > input { flex: 1 1 auto; min-width: 0; }
 .row > select { flex: 0 0 clamp(88px, 26%, 130px); }
+.row > .unit-tag {
+  flex: 0 0 clamp(88px, 26%, 130px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .9rem; color: var(--muted);
+  border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+}
 
 input, select {
   width: 100%;
@@ -95,8 +102,9 @@ input, select {
   outline: none;
   appearance: none;
 }
-input:focus, select:focus { box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light), 0 0 0 2px var(--gold3, #7a5c00); }
+input:focus, select:focus { box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light), 0 0 0 2px var(--gold3); }
 input.invalid { color: var(--red); }
+input:disabled { color: var(--muted); cursor: not-allowed; opacity: .75; }
 select {
   cursor: pointer;
   background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
@@ -128,6 +136,26 @@ input[type=number] { -moz-appearance: textfield; }
   font-variant-numeric: tabular-nums;
 }
 .result .error { color: var(--red); font-size: 1.05rem; }
+
+.vstat {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--sh-light);
+}
+.vstat > span {
+  display: block;
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+}
+.vstat > b {
+  display: block;
+  font-size: clamp(1.2rem, 4.5vw, 1.7rem);
+  color: var(--gold2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+.vstat > em { display: block; font-style: normal; font-size: .8rem; color: var(--muted); }
+
 .breakdown {
   margin-top: 18px;
   padding-top: 16px;
@@ -192,24 +220,44 @@ footer a:hover { color: var(--gold2); }
     <div class="field">
       <label for="kappa">Relative permittivity <span class="sym">(κ / εᵣ)</span></label>
       <input type="number" id="kappa" value="1" min="0" step="any" inputmode="decimal"/>
-      <p class="hint">Editing this switches the material to “Custom”.</p>
+    </div>
+
+    <div class="field">
+      <label for="strength">Dielectric strength</label>
+      <div class="row">
+        <input type="number" id="strength" min="0" step="any" inputmode="decimal"/>
+        <div class="unit-tag">kV/mm</div>
+      </div>
+      <p class="hint" id="strengthHint">&nbsp;</p>
     </div>
   </section>
 
   <section class="panel result nm-raised">
     <div class="primary" id="out">—</div>
     <div class="secondary" id="outAlt">&nbsp;</div>
+
+    <div class="vstat">
+      <span>Breakdown voltage</span>
+      <b id="outV">—</b>
+      <em id="outVNote">&nbsp;</em>
+    </div>
+
     <div class="breakdown">
       <div><span>Area</span><b id="bArea">—</b></div>
       <div><span>Separation</span><b id="bGap">—</b></div>
       <div><span class="sym">κ (εᵣ)</span><b id="bKappa">—</b></div>
       <div><span>Permittivity <span class="sym">ε</span></span><b id="bEps">—</b></div>
+      <div><span>Breakdown field</span><b id="bField">—</b></div>
+      <div><span>Energy at breakdown</span><b id="bEnergy">—</b></div>
     </div>
   </section>
 
   <footer>
     <p>ε₀ = 8.8541878188 × 10⁻¹² F/m (CODATA 2022)</p>
     <p>Ideal parallel-plate model — no fringing fields, uniform gap, single dielectric layer.</p>
+    <p>Breakdown figures are typical values for clean, uniform material and are
+       strongly affected by thickness, temperature, humidity, purity and electrode
+       finish. Treat them as order-of-magnitude guidance, not a safety rating.</p>
     <p><a href="index.html">← Netherlayer</a></p>
   </footer>
 
@@ -221,55 +269,72 @@ footer a:hover { color: var(--gold2); }
 
   const EPS0 = 8.8541878188e-12;   // F/m, vacuum permittivity
   const KAPPA_AIR = 1.00058986;    // dry air, 1 atm, 20 °C
+  const P_ATM = 101325;            // Pa
+
+  /* Paschen constants for air, converted from the usual A = 15 cm⁻¹Torr⁻¹,
+     B = 365 V cm⁻¹Torr⁻¹ (1 cm·Torr = 1.33322 m·Pa). γ is the secondary-
+     emission coefficient; 0.01 is a typical metal-electrode value. */
+  const PASCHEN_A = 11.25;     // 1/(m·Pa)
+  const PASCHEN_B = 273.75;    // V/(m·Pa)
+  const GAMMA_SE = 0.01;
+
+  /* Below the Paschen minimum the gas can no longer sustain an avalanche and
+     breakdown is set by field emission from the electrodes instead. This is a
+     surface-condition property, not a gas property — 20 MV/m is a common
+     figure for clean electrodes at millimetre gaps. */
+  const E_ELECTRODE = 20e6;    // V/m
 
   /* A partial vacuum still holds residual gas. Permittivity of a gas tracks its
      density (Clausius–Mossotti, dilute limit), so at v % vacuum the remaining
      (100 − v) % of an atmosphere gives κ = 1 + (κ_air − 1)·(1 − v/100). */
   const vacuumKappa = v => 1 + (KAPPA_AIR - 1) * (1 - v / 100);
 
+  /* Materials carry κ and either a bulk dielectric strength `e` (MV/m, i.e.
+     kV/mm) or a gas pressure `p` (Pa) that selects the Paschen model.
+     e === null means "no representative figure" rather than zero. */
   const vacuumOptions = [];
   for (let v = 80; v <= 95; v += 5) {
-    vacuumOptions.push({ name: `Vacuum, ${v}% (residual air)`, k: vacuumKappa(v) });
+    vacuumOptions.push({ name: `Vacuum, ${v}% (residual air)`, k: vacuumKappa(v), p: P_ATM * (1 - v / 100) });
   }
-  vacuumOptions.push({ name: 'Vacuum, 99.95% (residual air)', k: vacuumKappa(99.95) });
+  vacuumOptions.push({ name: 'Vacuum, 99.95% (residual air)', k: vacuumKappa(99.95), p: P_ATM * (1 - 99.95 / 100) });
 
   const GROUPS = [
     { label: 'Reference', items: [
-      { name: 'Perfect vacuum', k: 1 },
-      { name: 'Air (dry, 1 atm, 20 °C)', k: KAPPA_AIR }
+      { name: 'Perfect vacuum', k: 1, p: 0 },
+      { name: 'Air (dry, 1 atm, 20 °C)', k: KAPPA_AIR, p: P_ATM }
     ]},
     { label: 'Partial vacuum', items: vacuumOptions },
     { label: 'Plastics & films', items: [
-      { name: 'PTFE (Teflon)', k: 2.1 },
-      { name: 'Polypropylene (PP)', k: 2.2 },
-      { name: 'Polyethylene (PE)', k: 2.25 },
-      { name: 'Polystyrene (PS)', k: 2.5 },
-      { name: 'PET (Mylar)', k: 3.2 },
-      { name: 'Acrylic (PMMA)', k: 3.4 },
-      { name: 'Polyimide (Kapton)', k: 3.4 },
-      { name: 'PVC (rigid)', k: 3.5 },
-      { name: 'Nylon 6,6', k: 4.0 },
-      { name: 'Epoxy resin', k: 3.6 }
+      { name: 'PTFE (Teflon)', k: 2.1, e: 60 },
+      { name: 'Polypropylene (PP)', k: 2.2, e: 65 },
+      { name: 'Polyethylene (PE)', k: 2.25, e: 50 },
+      { name: 'Polystyrene (PS)', k: 2.5, e: 20 },
+      { name: 'PET (Mylar, thin film)', k: 3.2, e: 280 },
+      { name: 'Acrylic (PMMA)', k: 3.4, e: 20 },
+      { name: 'Polyimide (Kapton, thin film)', k: 3.4, e: 200 },
+      { name: 'PVC (rigid)', k: 3.5, e: 25 },
+      { name: 'Nylon 6,6', k: 4.0, e: 15 },
+      { name: 'Epoxy resin', k: 3.6, e: 20 }
     ]},
     { label: 'Ceramics, glass & minerals', items: [
-      { name: 'Fused quartz', k: 3.8 },
-      { name: 'FR-4 (glass-epoxy laminate)', k: 4.4 },
-      { name: 'Soda-lime glass', k: 7.0 },
-      { name: 'Mica (muscovite)', k: 6.0 },
-      { name: 'Alumina (Al₂O₃, 99 %)', k: 9.8 },
-      { name: 'Silicon (Si)', k: 11.7 },
-      { name: 'Tantalum pentoxide (Ta₂O₅)', k: 27 },
-      { name: 'Titanium dioxide (TiO₂)', k: 86 },
-      { name: 'Strontium titanate (SrTiO₃)', k: 310 },
-      { name: 'Barium titanate (BaTiO₃)', k: 1500 }
+      { name: 'Fused quartz', k: 3.8, e: 30 },
+      { name: 'FR-4 (glass-epoxy laminate)', k: 4.4, e: 20 },
+      { name: 'Soda-lime glass', k: 7.0, e: 10 },
+      { name: 'Mica (muscovite)', k: 6.0, e: 120 },
+      { name: 'Alumina (Al₂O₃, 99 %)', k: 9.8, e: 15 },
+      { name: 'Silicon (Si)', k: 11.7, e: 30 },
+      { name: 'Tantalum pentoxide (Ta₂O₅, anodic film)', k: 27, e: 400 },
+      { name: 'Titanium dioxide (TiO₂)', k: 86, e: 6 },
+      { name: 'Strontium titanate (SrTiO₃)', k: 310, e: 8 },
+      { name: 'Barium titanate (BaTiO₃)', k: 1500, e: 5 }
     ]},
     { label: 'Liquids & misc.', items: [
-      { name: 'Transformer oil', k: 2.2 },
-      { name: 'Paper (impregnated)', k: 3.5 },
-      { name: 'Neoprene rubber', k: 6.7 },
-      { name: 'Ethanol', k: 24.5 },
-      { name: 'Water (distilled, 20 °C)', k: 80.1 },
-      { name: 'Glycerol', k: 42.5 }
+      { name: 'Transformer oil', k: 2.2, e: 12 },
+      { name: 'Paper (oil-impregnated)', k: 3.5, e: 40 },
+      { name: 'Neoprene rubber', k: 6.7, e: 20 },
+      { name: 'Ethanol', k: 24.5, e: null },
+      { name: 'Water (distilled, 20 °C)', k: 80.1, e: 13 },
+      { name: 'Glycerol', k: 42.5, e: null }
     ]}
   ];
 
@@ -277,20 +342,28 @@ footer a:hover { color: var(--gold2); }
   const els = {
     area: $('area'), areaUnit: $('areaUnit'),
     gap: $('gap'), gapUnit: $('gapUnit'),
-    preset: $('preset'), presetHint: $('presetHint'), kappa: $('kappa'),
-    out: $('out'), outAlt: $('outAlt'),
-    bArea: $('bArea'), bGap: $('bGap'), bKappa: $('bKappa'), bEps: $('bEps')
+    preset: $('preset'), presetHint: $('presetHint'),
+    kappa: $('kappa'), strength: $('strength'), strengthHint: $('strengthHint'),
+    out: $('out'), outAlt: $('outAlt'), outV: $('outV'), outVNote: $('outVNote'),
+    bArea: $('bArea'), bGap: $('bGap'), bKappa: $('bKappa'), bEps: $('bEps'),
+    bField: $('bField'), bEnergy: $('bEnergy')
   };
 
   /* ─── Build the material dropdown ─── */
-  const custom = new Option('Custom value…', 'custom');
-  els.preset.add(custom);
+  // Options carry an index into MATERIALS so each keeps κ, strength and pressure.
+  const MATERIALS = [];
+  els.preset.add(new Option('Custom value…', 'custom'));
   GROUPS.forEach(group => {
     const og = document.createElement('optgroup');
     og.label = group.label;
-    group.items.forEach(item => og.appendChild(new Option(item.name, String(item.k))));
+    group.items.forEach(item => {
+      og.appendChild(new Option(item.name, String(MATERIALS.push(item) - 1)));
+    });
     els.preset.add(og);
   });
+
+  // Null until a gas preset is chosen; holds that gas's pressure in Pa.
+  let gasPressure = null;
 
   /* ─── Formatting ─── */
   // Significant-figure string without a trailing exponent, e.g. 1.00058986.
@@ -315,14 +388,41 @@ footer a:hover { color: var(--gold2); }
 
   // Nearest engineering prefix, for a human-readable second opinion.
   const PREFIXES = [
-    [1e12, 'TF'], [1e9, 'GF'], [1e6, 'MF'], [1e3, 'kF'], [1, 'F'],
-    [1e-3, 'mF'], [1e-6, 'µF'], [1e-9, 'nF'], [1e-12, 'pF'], [1e-15, 'fF'], [1e-18, 'aF']
+    [1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''],
+    [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p'], [1e-15, 'f'], [1e-18, 'a']
   ];
-  const engineering = x => {
-    if (x === 0) return '0 F';
-    const [scale, unit] = PREFIXES.find(([s]) => Math.abs(x) >= s) || PREFIXES[PREFIXES.length - 1];
-    return `${sig(x / scale, 4)} ${unit}`;
+  const engineering = (x, unit) => {
+    if (x === 0) return `0 ${unit}`;
+    const [scale, prefix] = PREFIXES.find(([s]) => Math.abs(x) >= s) || PREFIXES[PREFIXES.length - 1];
+    return `${sig(x / scale, 4)} ${prefix}${unit}`;
   };
+
+  /* ─── Physics ─── */
+  /* Paschen's law: the breakdown voltage of a gas depends on pressure × gap,
+     not on gap alone, and passes through a minimum. Below that minimum the
+     denominator goes non-positive — too few collisions to avalanche at any
+     voltage — which we report as infinite so the electrode limit takes over. */
+  function paschenVolts(p, d) {
+    const pd = p * d;
+    if (pd <= 0) return Infinity;
+    const denom = Math.log(PASCHEN_A * pd) - Math.log(Math.log(1 + 1 / GAMMA_SE));
+    return denom > 0 ? PASCHEN_B * pd / denom : Infinity;
+  }
+
+  /* Returns { volts, note } for the given gap. Gases break down by whichever
+     mechanism trips first; solids and liquids use a constant bulk strength. */
+  function breakdown(d) {
+    if (gasPressure !== null) {
+      const gas = paschenVolts(gasPressure, d);
+      const electrode = E_ELECTRODE * d;
+      return gas <= electrode
+        ? { volts: gas, note: 'Townsend avalanche in the residual gas (Paschen’s law)' }
+        : { volts: electrode, note: 'Gas cannot avalanche — limited by field emission from the electrodes (~20 kV/mm, surface-dependent)' };
+    }
+    const eMVm = parseFloat(els.strength.value);
+    if (!isFinite(eMVm) || eMVm <= 0) return { volts: NaN, note: 'Enter a dielectric strength for a breakdown voltage.' };
+    return { volts: eMVm * 1e6 * d, note: 'Bulk dielectric strength × separation' };
+  }
 
   /* ─── Calculation ─── */
   function readPositive(input) {
@@ -338,6 +438,8 @@ footer a:hover { color: var(--gold2); }
     const kappaRaw = parseFloat(els.kappa.value);
     const kappaOk = isFinite(kappaRaw) && kappaRaw > 0;
     els.kappa.classList.toggle('invalid', els.kappa.value !== '' && !kappaOk);
+    els.strength.classList.toggle('invalid',
+      !els.strength.disabled && els.strength.value !== '' && !(parseFloat(els.strength.value) > 0));
 
     els.bArea.textContent = isFinite(area) ? `${sci(area, 4)} m²` : '—';
     els.bGap.textContent = isFinite(gap) ? `${sci(gap, 4)} m` : '—';
@@ -347,37 +449,87 @@ footer a:hover { color: var(--gold2); }
     if (!isFinite(area) || !isFinite(gap) || !kappaOk) {
       els.out.textContent = '—';
       els.outAlt.innerHTML = '<span class="error">Enter a positive area, separation and κ.</span>';
+      els.outV.textContent = '—';
+      els.outVNote.innerHTML = '&nbsp;';
+      els.bField.textContent = '—';
+      els.bEnergy.textContent = '—';
       return;
     }
 
     const C = EPS0 * kappaRaw * area / gap;   // farads
     els.out.innerHTML = `${sci(C, 6)}<span class="unit">F</span>`;
-    els.outAlt.textContent = `= ${engineering(C)}`;
+    els.outAlt.textContent = `= ${engineering(C, 'F')}`;
+
+    const bd = breakdown(gap);
+    if (isFinite(bd.volts)) {
+      els.outV.textContent = engineering(bd.volts, 'V');
+      els.bField.textContent = `${sig(bd.volts / gap / 1e6, 4)} kV/mm`;
+      // ½CV² — the energy the dielectric can hold before it lets go.
+      els.bEnergy.textContent = engineering(0.5 * C * bd.volts * bd.volts, 'J');
+    } else {
+      els.outV.textContent = '—';
+      els.bField.textContent = '—';
+      els.bEnergy.textContent = '—';
+    }
+    els.outVNote.textContent = bd.note;
   }
 
   /* ─── Wiring ─── */
+  // Leaving a preset means the numbers are the user's own from here on.
+  function goCustom() {
+    els.preset.value = 'custom';
+    els.presetHint.innerHTML = '&nbsp;';
+    gasPressure = null;
+    els.strength.disabled = false;
+    els.strength.placeholder = '';
+    els.strengthHint.textContent = 'Field the material withstands before it conducts.';
+  }
+
   els.preset.addEventListener('change', () => {
     const opt = els.preset.selectedOptions[0];
     if (opt.value === 'custom') {
-      els.presetHint.innerHTML = '&nbsp;';
+      goCustom();
       els.kappa.focus();
+      update();
+      return;
+    }
+
+    const mat = MATERIALS[Number(opt.value)];
+    els.kappa.value = sig(mat.k, 9);
+    els.presetHint.textContent = `${mat.name} — κ = ${sig(mat.k, 9)}`;
+
+    if (mat.p !== undefined) {
+      // A gas has no fixed dielectric strength — Paschen's law governs instead.
+      gasPressure = mat.p;
+      els.strength.value = '';
+      els.strength.disabled = true;
+      els.strength.placeholder = mat.p > 0 ? 'set by Paschen’s law' : 'set by the electrodes';
+      els.strengthHint.textContent = mat.p > 0
+        ? `Gas at ${sig(mat.p, 4)} Pa — breakdown depends on pressure × gap, not gap alone.`
+        : 'No gas to ionise — breakdown is set by the electrode surfaces.';
     } else {
-      els.kappa.value = sig(parseFloat(opt.value), 9);
-      els.presetHint.textContent = `${opt.textContent} — κ = ${sig(parseFloat(opt.value), 9)}`;
+      gasPressure = null;
+      els.strength.disabled = false;
+      els.strength.placeholder = '';
+      els.strength.value = mat.e === null ? '' : String(mat.e);
+      els.strengthHint.textContent = mat.e === null
+        ? 'No representative published figure — enter your own to get a breakdown voltage.'
+        : `Typical bulk value: ${mat.e} kV/mm (${mat.e} MV/m).`;
     }
     update();
   });
 
-  // Typing a κ by hand means the material is no longer a preset.
-  els.kappa.addEventListener('input', () => {
-    els.preset.value = 'custom';
-    els.presetHint.innerHTML = '&nbsp;';
+  // Typing a κ or a strength by hand means the material is no longer a preset.
+  els.kappa.addEventListener('input', () => { goCustom(); update(); });
+  els.strength.addEventListener('input', () => {
+    if (els.preset.value !== 'custom') goCustom();
     update();
   });
 
   [els.area, els.areaUnit, els.gap, els.gapUnit].forEach(el => el.addEventListener('input', update));
 
   els.preset.value = 'custom';
+  goCustom();
   update();
 })();
 </script>
