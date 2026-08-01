@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Cable Resistance &amp; Voltage Drop</title>
+<style>
+/* ─── Design tokens (shared with Netherlayer) ─── */
+:root {
+  --bg:       #0e0e1c;
+  --surface:  #0e0e1c;
+  --raised:   #13132a;
+  --sh-dark:  #07070f;
+  --sh-light: #191933;
+  --gold:     #d4af37;
+  --gold2:    #f0c040;
+  --gold3:    #7a5c00;
+  --text:     #d8d8f0;
+  --muted:    #7070a0;
+  --green:    #2ecc71;
+  --red:      #e74c3c;
+  --radius:   16px;
+  --gap:      clamp(16px, 3vw, 32px);
+
+  /* Ordinal ramp for pressure — one hue, light→dark, validated against this
+     surface (monotone L, ΔL ≥ 0.06, dark end 3.89:1). Darker = more gas. */
+  --p1: #f6e7b2;
+  --p2: #e8cc72;
+  --p3: #d4af37;
+  --p4: #b08d1f;
+  --p5: #8a6d12;
+  --grid: #1c1c34;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.6; padding: var(--gap); display: flex; justify-content: center;
+}
+.wrap { width: 100%; max-width: 820px; }
+
+.nm-raised {
+  background: var(--surface);
+  box-shadow: 8px 8px 20px var(--sh-dark), -8px -8px 20px var(--sh-light);
+  border-radius: var(--radius);
+}
+
+header { text-align: center; margin-bottom: var(--gap); }
+h1 { font-size: clamp(1.5rem, 4vw, 2.2rem); color: var(--gold); letter-spacing: .02em; }
+header p { color: var(--muted); font-size: .95rem; }
+
+.panel { padding: var(--gap); margin-bottom: var(--gap); }
+.field { margin-bottom: 20px; }
+.field:last-child { margin-bottom: 0; }
+label {
+  display: block; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin-bottom: 8px;
+}
+.sym { text-transform: none; }
+.row { display: flex; gap: 10px; }
+.row > input { flex: 1 1 auto; min-width: 0; }
+.row > select { flex: 0 0 clamp(84px, 24%, 120px); }
+.row > .unit-tag {
+  flex: 0 0 clamp(84px, 24%, 120px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .88rem; color: var(--muted); border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+}
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; }
+.grid5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 10px; }
+
+input, select {
+  width: 100%; padding: 12px 14px; font: inherit; font-size: 1rem;
+  color: var(--text); background: var(--surface); border: none; border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+  outline: none; appearance: none;
+}
+.grid5 input { padding: 10px; font-size: .9rem; text-align: center; }
+input:focus, select:focus { box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light), 0 0 0 2px var(--gold3); }
+input.invalid { color: var(--red); }
+select {
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 34px;
+}
+select option { background: var(--raised); color: var(--text); }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+.hint { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+
+/* ─── Results ─── */
+.caption { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 14px; margin-top: 8px;
+}
+.stats div > span { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.stats div b { font-weight: 600; font-variant-numeric: tabular-nums; font-size: .95rem; }
+.split { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--sh-light); }
+.err { color: var(--red); font-size: 1rem; display: block; }
+
+/* ─── Chart ─── */
+.chart-wrap { position: relative; margin-top: 10px; }
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg.chart .grid-line { stroke: var(--grid); stroke-width: 1; }
+svg.chart .axis-line { stroke: var(--sh-light); stroke-width: 1; }
+svg.chart .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+svg.chart .axis-title { fill: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+svg.chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg.chart .crosshair { stroke: var(--muted); stroke-width: 1; }
+svg.chart .dot { stroke: var(--surface); stroke-width: 2; }
+svg.chart .limit-mark { fill: none; stroke-width: 2; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; }
+.legend span { display: flex; align-items: center; gap: 7px; font-size: .82rem; color: var(--text); font-variant-numeric: tabular-nums; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+
+.tip {
+  position: absolute; pointer-events: none; opacity: 0;
+  background: var(--raised); border: 1px solid var(--sh-light); border-radius: 10px;
+  padding: 9px 11px; font-size: .8rem; min-width: 150px;
+  box-shadow: 4px 4px 14px var(--sh-dark); transition: opacity .12s;
+}
+.tip h4 { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 5px; }
+.tip div { display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
+.tip i { width: 10px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+.tip em { font-style: normal; color: var(--muted); margin-left: auto; }
+
+table.data { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: .86rem; }
+table.data th {
+  text-align: right; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); font-weight: 600; padding: 6px 8px;
+}
+table.data th:first-child, table.data td:first-child { text-align: left; }
+table.data td { padding: 6px 8px; border-top: 1px solid var(--sh-light); font-variant-numeric: tabular-nums; text-align: right; }
+table.data td i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
+.scroll-x { overflow-x: auto; }
+
+footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: var(--gap); }
+footer p { margin-bottom: 6px; }
+footer a { color: var(--gold); text-decoration: none; }
+footer a:hover { color: var(--gold2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Cable Resistance &amp; Voltage Drop</h1>
+    <p>Conductor resistance over a run, and what the surrounding gas does to it.</p>
+  </header>
+
+  <section class="panel nm-raised">
+    <div class="grid2">
+      <div class="field">
+        <label for="len">Cable length</label>
+        <div class="row">
+          <input type="number" id="len" value="1000" min="0" step="any" inputmode="decimal"/>
+          <select id="lenUnit">
+            <option value="1" selected>m</option>
+            <option value="1000">km</option>
+            <option value="0.3048">ft</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="mat">Conductor material</label>
+        <select id="mat"><!-- populated by script --></select>
+        <p class="hint" id="matHint">&nbsp;</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="build">Construction</label>
+      <select id="build">
+        <option value="solid" selected>Solid conductor</option>
+        <option value="stranded">Stranded — many conductors in one cable</option>
+      </select>
+    </div>
+
+    <div class="grid2" id="solidRow">
+      <div class="field">
+        <label for="dia">Conductor diameter</label>
+        <div class="row">
+          <input type="number" id="dia" value="20" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">mm</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" id="strandRow" style="display:none">
+      <div class="field">
+        <label for="nStrand">Number of strands</label>
+        <input type="number" id="nStrand" value="500" min="1" step="1" inputmode="numeric"/>
+      </div>
+      <div class="field">
+        <label for="dStrand">Strand diameter</label>
+        <div class="row">
+          <input type="number" id="dStrand" value="1" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">mm</div>
+        </div>
+        <p class="hint" id="strandHint">&nbsp;</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <div class="caption" style="margin-bottom:16px">Enclosure</div>
+    <div class="grid2">
+      <div class="field">
+        <label for="gas">Tube fill gas</label>
+        <select id="gas"><!-- populated by script --></select>
+        <p class="hint" id="gasHint">&nbsp;</p>
+      </div>
+      <div class="field">
+        <label for="tube">Tube inner diameter</label>
+        <div class="row">
+          <input type="number" id="tube" value="100" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">mm</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="twall">Tube wall temperature</label>
+        <div class="row">
+          <input type="number" id="twall" value="25" step="any" inputmode="decimal"/>
+          <div class="unit-tag">°C</div>
+        </div>
+      </div>
+      <div class="field">
+        <label for="tmax">Conductor temperature limit</label>
+        <div class="row">
+          <input type="number" id="tmax" value="90" step="any" inputmode="decimal"/>
+          <div class="unit-tag">°C</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="emis">Conductor surface emissivity</label>
+        <input type="number" id="emis" value="0.5" min="0.01" max="1" step="any" inputmode="decimal"/>
+        <p class="hint">Bright metal ≈ 0.05, oxidised ≈ 0.7, black ≈ 0.95.</p>
+      </div>
+      <div class="field">
+        <label for="imax">Current axis maximum</label>
+        <div class="row">
+          <input type="number" id="imax" value="2000" min="1" step="any" inputmode="decimal"/>
+          <div class="unit-tag">A</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Fill pressures for the five curves</label>
+      <div class="grid5">
+        <input type="number" id="p1" value="0.001" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p2" value="1" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p3" value="50" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p4" value="1000" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p5" value="5000" min="0" step="any" inputmode="decimal"/>
+      </div>
+      <p class="hint">Millibar. 1000 mbar is one atmosphere; 0.001 mbar is a hard vacuum.</p>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <div class="caption">Conductor</div>
+    <div class="stats" id="stats"></div>
+    <div id="err"></div>
+
+    <div class="split">
+      <div class="caption">Voltage drop against current</div>
+      <div class="chart-wrap">
+        <svg class="chart" id="chart" viewBox="0 0 760 400" role="img" aria-label="Voltage drop against current at five fill pressures"></svg>
+        <div class="tip" id="tip"></div>
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="split">
+      <div class="caption">At the temperature limit</div>
+      <div class="scroll-x">
+        <table class="data">
+          <thead><tr>
+            <th>Fill pressure</th><th>Max current</th><th>Drop there</th>
+            <th>Conductor temp at full scale</th><th>Drop at full scale</th>
+          </tr></thead>
+          <tbody id="table"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Resistance is DC. The gas sets how well the conductor is cooled, cooling sets
+       its temperature, and temperature sets resistivity — which is why the same
+       cable drops more volts in vacuum than in gas at the same current.</p>
+    <p>Heat leaves by radiation and through the gas: conduction across the annulus,
+       corrected for temperature jump so it falls away with pressure once the mean
+       free path rivals the gap, plus natural convection once the Rayleigh number
+       supports it. Gas properties are scaled from 300 K values.</p>
+    <p><a href="index.html">← Netherlayer</a> · <a href="capacitor.html">Capacitance</a> · <a href="launch-energy.html">Launch energy</a></p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const SIGMA = 5.670374419e-8;   // W/m²K⁴
+  const KB = 1.380649e-23;        // J/K
+  const RU = 8.314462618;         // J/mol·K
+  const ACCOM = 0.85;             // thermal accommodation coefficient
+  const PACKING = 0.75;           // strand packing fraction in a round bundle
+
+  /* ρ at 20 °C (Ω·m), temperature coefficient (1/K), density (kg/m³) */
+  const MATERIALS = [
+    { name: 'Copper (annealed)', rho: 1.68e-8, alpha: 0.00393, den: 8960 },
+    { name: 'Silver', rho: 1.59e-8, alpha: 0.0038, den: 10490 },
+    { name: 'Gold', rho: 2.44e-8, alpha: 0.0034, den: 19300 },
+    { name: 'Aluminium', rho: 2.65e-8, alpha: 0.00429, den: 2700 },
+    { name: 'Tungsten', rho: 5.60e-8, alpha: 0.0045, den: 19300 },
+    { name: 'Brass', rho: 7.0e-8, alpha: 0.0015, den: 8500 },
+    { name: 'Nickel', rho: 6.99e-8, alpha: 0.006, den: 8900 },
+    { name: 'Iron', rho: 9.71e-8, alpha: 0.005, den: 7870 },
+    { name: 'Platinum', rho: 1.06e-7, alpha: 0.00392, den: 21450 },
+    { name: 'Tin', rho: 1.09e-7, alpha: 0.0045, den: 7310 },
+    { name: 'Steel (mild)', rho: 1.43e-7, alpha: 0.0045, den: 7850 },
+    { name: 'Lead', rho: 2.20e-7, alpha: 0.0039, den: 11340 },
+    { name: 'Stainless 304', rho: 7.2e-7, alpha: 0.00094, den: 8000 },
+    { name: 'Nichrome', rho: 1.10e-6, alpha: 0.0004, den: 8400 }
+  ];
+
+  /* M (kg/mol), collision diameter (m), k and µ at 300 K, cp (J/kg·K), γ */
+  const GASES = [
+    { name: 'Argon', M: 0.039948, d: 3.64e-10, k: 0.0177, mu: 2.27e-5, cp: 520, g: 1.667 },
+    { name: 'Helium', M: 0.004003, d: 2.18e-10, k: 0.1513, mu: 1.99e-5, cp: 5193, g: 1.667 },
+    { name: 'Neon', M: 0.020180, d: 2.59e-10, k: 0.0491, mu: 3.18e-5, cp: 1030, g: 1.667 },
+    { name: 'Krypton', M: 0.083798, d: 4.16e-10, k: 0.00943, mu: 2.53e-5, cp: 248, g: 1.667 },
+    { name: 'Xenon', M: 0.131293, d: 4.85e-10, k: 0.00565, mu: 2.31e-5, cp: 158, g: 1.667 },
+    { name: 'Nitrogen', M: 0.028014, d: 3.75e-10, k: 0.0259, mu: 1.78e-5, cp: 1040, g: 1.4 },
+    { name: 'Dry air', M: 0.028960, d: 3.71e-10, k: 0.0262, mu: 1.85e-5, cp: 1005, g: 1.4 },
+    { name: 'Sulphur hexafluoride (SF₆)', M: 0.146055, d: 5.50e-10, k: 0.0136, mu: 1.53e-5, cp: 665, g: 1.09 }
+  ];
+
+  const $ = id => document.getElementById(id);
+  const els = {};
+  ['len','lenUnit','mat','matHint','build','solidRow','strandRow','dia','nStrand','dStrand',
+   'strandHint','gas','gasHint','tube','twall','tmax','emis','imax','p1','p2','p3','p4','p5',
+   'stats','err','chart','tip','legend','table'].forEach(id => { els[id] = $(id); });
+
+  MATERIALS.forEach((m, i) => els.mat.add(new Option(m.name, String(i))));
+  GASES.forEach((g, i) => els.gas.add(new Option(g.name, String(i))));
+  els.mat.value = '0';
+  els.gas.value = '0';
+
+  const RAMP = ['--p1', '--p2', '--p3', '--p4', '--p5'].map(v =>
+    getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+
+  /* ─── Formatting ─── */
+  const sig = (x, n = 4) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return '0';
+    const s = x.toPrecision(n);
+    if (s.includes('e')) return Number(s).toString();
+    return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
+  };
+  const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+  const sci = (x, n = 4) => {
+    if (!isFinite(x) || x === 0) return sig(x, n);
+    const e = Math.floor(Math.log10(Math.abs(x)));
+    if (e >= -3 && e <= 4) return sig(x, n);
+    return `${(x / Math.pow(10, e)).toPrecision(n)} × 10${String(e).split('').map(c => SUP[c]).join('')}`;
+  };
+  const pLabel = mbar => mbar >= 1000 ? `${sig(mbar / 1000, 3)} bar`
+    : mbar >= 1 ? `${sig(mbar, 3)} mbar`
+    : `${sci(mbar, 2)} mbar`;
+
+  /* ─── Thermal model ─────────────────────────────────────────────────────
+     Heat leaves the conductor two ways. Radiation does not care about the gas.
+     The gas path is conduction across the annulus with a temperature-jump term
+     that kills it off as the mean free path grows, plus convection once the
+     Rayleigh number is high enough to move the gas at all. */
+  function heatOut(Tc, Tw, p, gas, geom, emis) {
+    const r1 = geom.d1 / 2, r2 = geom.d2 / 2, L = geom.len;
+    const dT = Tc - Tw;
+    if (dT <= 0) return 0;
+
+    const rad = emis * SIGMA * Math.PI * geom.d1 * L * (Math.pow(Tc, 4) - Math.pow(Tw, 4));
+    if (p <= 0) return rad;
+
+    const Tf = (Tc + Tw) / 2;
+    const scale = Math.pow(Tf / 300, 0.7);      // both k and µ rise with temperature
+    const k = gas.k * scale, mu = gas.mu * scale;
+    const Pr = mu * gas.cp / k;
+    const rhoG = p * gas.M / (RU * Tf);
+
+    // Temperature jump — the gas stops touching the walls properly once its mean
+    // free path is comparable to the gap, which is what makes vacuum an insulator.
+    const mfp = KB * Tf / (Math.SQRT2 * Math.PI * gas.d * gas.d * p);
+    const jump = ((2 - ACCOM) / ACCOM) * (2 * gas.g / (gas.g + 1)) * (mfp / Pr);
+
+    // Natural convection in the annulus (Raithby–Hollands form). Ra ∝ p², so it
+    // fades out long before conduction does.
+    const delta = r2 - r1;
+    const Ra = 9.80665 * (1 / Tf) * dT * Math.pow(delta, 3) * rhoG * rhoG * gas.cp / (mu * k);
+    const Nu = Math.max(1, 0.386 * Math.pow(Pr / (0.861 + Pr), 0.25) * Math.pow(Math.max(Ra, 0), 0.25));
+
+    const denom = Math.log(r2 / r1) + jump * (1 / r1 + 1 / r2);
+    const gasQ = 2 * Math.PI * k * Nu * L * dT / denom;
+    return rad + gasQ;
+  }
+
+  // Equilibrium temperature: I²R(T) heats it, heatOut(T) cools it. Both are
+  // monotone in T, so bisection is safe and needs no starting guess.
+  function solveTemp(I, p, gas, geom, mat, Tw, emis) {
+    if (I <= 0) return Tw;
+    const gen = T => I * I * resistance(T, geom, mat);
+    let lo = Tw, hi = 3273;
+    if (gen(hi) - heatOut(hi, Tw, p, gas, geom, emis) > 0) return hi;   // runaway
+    for (let i = 0; i < 70; i++) {
+      const mid = (lo + hi) / 2;
+      if (gen(mid) - heatOut(mid, Tw, p, gas, geom, emis) > 0) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  }
+
+  const resistance = (T, geom, mat) =>
+    mat.rho * (1 + mat.alpha * (T - 273.15 - 20)) * geom.len / geom.area;
+
+  /* ─── Chart ─── */
+  const W = 760, H = 400, M = { t: 14, r: 18, b: 48, l: 66 };
+  const PW = W - M.l - M.r, PH = H - M.t - M.b;
+
+  function niceMax(v) {
+    if (v <= 0) return 1;
+    const e = Math.pow(10, Math.floor(Math.log10(v)));
+    const f = v / e;
+    return (f <= 1 ? 1 : f <= 1.5 ? 1.5 : f <= 2 ? 2 : f <= 2.5 ? 2.5
+      : f <= 3 ? 3 : f <= 4 ? 4 : f <= 5 ? 5 : f <= 8 ? 8 : 10) * e;
+  }
+
+  let chartState = null;
+
+  function drawChart(series, iMax, vMax) {
+    const x = i => M.l + (i / iMax) * PW;
+    const y = v => M.t + PH - (v / vMax) * PH;
+    const parts = [];
+
+    // Hairline grid, solid — dashes read as thresholds.
+    const yTicks = 5, xTicks = 5;
+    for (let i = 0; i <= yTicks; i++) {
+      const v = vMax * i / yTicks, py = y(v);
+      parts.push(`<line class="grid-line" x1="${M.l}" y1="${py}" x2="${M.l + PW}" y2="${py}"/>`);
+      parts.push(`<text class="tick" x="${M.l - 10}" y="${py + 4}" text-anchor="end">${sig(v, 3)}</text>`);
+    }
+    for (let i = 0; i <= xTicks; i++) {
+      const c = iMax * i / xTicks, px = x(c);
+      parts.push(`<line class="grid-line" x1="${px}" y1="${M.t}" x2="${px}" y2="${M.t + PH}"/>`);
+      parts.push(`<text class="tick" x="${px}" y="${M.t + PH + 20}" text-anchor="middle">${sig(c, 3)}</text>`);
+    }
+    parts.push(`<line class="axis-line" x1="${M.l}" y1="${M.t + PH}" x2="${M.l + PW}" y2="${M.t + PH}"/>`);
+    parts.push(`<line class="axis-line" x1="${M.l}" y1="${M.t}" x2="${M.l}" y2="${M.t + PH}"/>`);
+    parts.push(`<text class="axis-title" x="${M.l + PW / 2}" y="${H - 8}" text-anchor="middle">Current (A)</text>`);
+    parts.push(`<text class="axis-title" transform="translate(16 ${M.t + PH / 2}) rotate(-90)" text-anchor="middle">Voltage drop (V)</text>`);
+
+    series.forEach(s => {
+      const pts = s.pts.map(p => `${x(p.i).toFixed(2)},${y(p.v).toFixed(2)}`).join(' ');
+      parts.push(`<polyline class="series" points="${pts}" stroke="${s.color}"/>`);
+      // Selective direct marking: only where the curve crosses the temperature limit.
+      if (s.limitAt) parts.push(
+        `<circle class="limit-mark" cx="${x(s.limitAt.i)}" cy="${y(s.limitAt.v)}" r="4.5" stroke="${s.color}"/>`);
+    });
+
+    parts.push(`<g id="hoverLayer" opacity="0"><line class="crosshair" y1="${M.t}" y2="${M.t + PH}"/>` +
+      series.map(s => `<circle class="dot" r="4" fill="${s.color}"/>`).join('') + '</g>');
+    parts.push(`<rect id="hitArea" x="${M.l}" y="${M.t}" width="${PW}" height="${PH}" fill="transparent"/>`);
+
+    els.chart.innerHTML = parts.join('');
+    chartState = { series, iMax, vMax, x, y };
+    bindHover();
+  }
+
+  function bindHover() {
+    const hit = els.chart.querySelector('#hitArea');
+    const layer = els.chart.querySelector('#hoverLayer');
+    if (!hit) return;
+    const line = layer.querySelector('line');
+    const dots = [...layer.querySelectorAll('circle')];
+
+    const move = ev => {
+      const box = els.chart.getBoundingClientRect();
+      const px = (ev.clientX - box.left) * (W / box.width);
+      const { series, iMax, x, y } = chartState;
+      const frac = Math.min(1, Math.max(0, (px - M.l) / PW));
+      const n = series[0].pts.length;
+      const idx = Math.round(frac * (n - 1));
+      const cur = series[0].pts[idx].i;
+
+      line.setAttribute('x1', x(cur)); line.setAttribute('x2', x(cur));
+      series.forEach((s, k) => {
+        dots[k].setAttribute('cx', x(cur));
+        dots[k].setAttribute('cy', y(s.pts[idx].v));
+      });
+      layer.setAttribute('opacity', '1');
+
+      els.tip.innerHTML = `<h4>${sig(cur, 4)} A</h4>` + series.map(s =>
+        `<div><i style="background:${s.color}"></i>${s.label}<em>${sig(s.pts[idx].v, 3)} V</em></div>`).join('');
+      const boxW = els.tip.offsetWidth || 170;
+      const left = (x(cur) / W) * box.width;
+      // Sit on whichever side of the crosshair has room, so the tooltip never
+      // covers the curves it is reading.
+      const place = left > box.width / 2 ? left - boxW - 14 : left + 14;
+      els.tip.style.left = Math.min(box.width - boxW - 4, Math.max(4, place)) + 'px';
+      els.tip.style.top = '10px';
+      els.tip.style.opacity = '1';
+    };
+    hit.addEventListener('mousemove', move);
+    hit.addEventListener('touchmove', e => { move(e.touches[0]); e.preventDefault(); }, { passive: false });
+    const leave = () => { layer.setAttribute('opacity', '0'); els.tip.style.opacity = '0'; };
+    hit.addEventListener('mouseleave', leave);
+    hit.addEventListener('touchend', leave);
+  }
+
+  /* ─── Main ─── */
+  function readPositive(el, allowZero) {
+    const v = parseFloat(el.value);
+    const ok = isFinite(v) && (allowZero ? v >= 0 : v > 0);
+    el.classList.toggle('invalid', el.value !== '' && !ok);
+    return ok ? v : NaN;
+  }
+
+  function fail(msg) {
+    els.err.innerHTML = `<span class="err">${msg}</span>`;
+    els.stats.innerHTML = '';
+    els.chart.innerHTML = '';
+    els.legend.innerHTML = '';
+    els.table.innerHTML = '';
+  }
+
+  function update() {
+    const stranded = els.build.value === 'stranded';
+    els.solidRow.style.display = stranded ? 'none' : '';
+    els.strandRow.style.display = stranded ? '' : 'none';
+
+    const len = readPositive(els.len) * parseFloat(els.lenUnit.value);
+    const mat = MATERIALS[Number(els.mat.value)];
+    const gas = GASES[Number(els.gas.value)];
+    const tube = readPositive(els.tube) / 1000;
+    const Tw = parseFloat(els.twall.value) + 273.15;
+    const Tlim = parseFloat(els.tmax.value) + 273.15;
+    const emis = readPositive(els.emis);
+    const iMaxRaw = readPositive(els.imax);
+    const pressures = ['p1','p2','p3','p4','p5'].map(id => readPositive(els[id], true) * 100); // mbar → Pa
+
+    els.matHint.textContent = `ρ₂₀ = ${sci(mat.rho, 3)} Ω·m, ${(mat.alpha * 100).toFixed(3)} %/K`;
+    els.gasHint.textContent = `k = ${sig(gas.k, 3)} W/m·K at 300 K — ${
+      gas.k > 0.05 ? 'a good conductor of heat for a gas' : 'a poor one, so it insulates as much as it cools'}`;
+
+    let area, d1, strandInfo = null;
+    if (stranded) {
+      const n = readPositive(els.nStrand);
+      const ds = readPositive(els.dStrand) / 1000;
+      if (!isFinite(n) || !isFinite(ds)) return fail('Give a strand count and a strand diameter.');
+      area = n * Math.PI * ds * ds / 4;
+      d1 = ds * Math.sqrt(n / PACKING);
+      strandInfo = { n, ds, surface: n * Math.PI * ds * len };
+      els.strandHint.textContent = `Bundle ≈ ${sig(d1 * 1000, 3)} mm across at ${PACKING * 100} % packing.`;
+    } else {
+      const d = readPositive(els.dia) / 1000;
+      if (!isFinite(d)) return fail('Give a conductor diameter.');
+      area = Math.PI * d * d / 4;
+      d1 = d;
+    }
+
+    if ([len, tube, emis, iMaxRaw].some(x => !isFinite(x)) || !isFinite(Tw) || !isFinite(Tlim)) {
+      return fail('Fill in every field with a number.');
+    }
+    if (pressures.some(x => !isFinite(x))) return fail('All five pressures must be zero or positive.');
+    if (tube <= d1) return fail(`The conductor is ${sig(d1 * 1000, 3)} mm across — it does not fit a ${sig(tube * 1000, 3)} mm tube.`);
+    if (Tlim <= Tw) return fail('The temperature limit must be above the tube wall temperature.');
+    els.err.innerHTML = '';
+
+    const geom = { len, area, d1, d2: tube };
+    const R20 = resistance(293.15, geom, mat);
+    const Rlim = resistance(Tlim, geom, mat);
+
+    const solidSurface = Math.PI * d1 * len;
+    const stats = [
+      ['Conductor cross-section', `${sig(area * 1e6, 4)} mm²`],
+      ['Resistance at 20 °C', `${sci(R20, 4)} Ω`],
+      [`Resistance at ${sig(Tlim - 273.15, 3)} °C`, `${sci(Rlim, 4)} Ω`],
+      ['Resistance per km', `${sci(R20 * 1000 / len, 4)} Ω/km`],
+      ['Conductor outer diameter', `${sig(d1 * 1000, 4)} mm`],
+      ['Conductor mass', `${sig(area * len * mat.den, 4)} kg`]
+    ];
+    if (strandInfo) {
+      stats.push(['Strand surface area, all strands', `${sig(strandInfo.surface, 4)} m²`]);
+      stats.push(['Against one solid conductor', `${sig(strandInfo.surface / solidSurface, 3)}× (${sig(solidSurface, 4)} m²)`]);
+    } else {
+      stats.push(['Conductor surface area', `${sig(solidSurface, 4)} m²`]);
+    }
+    els.stats.innerHTML = stats.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+
+    /* Sweep current for each pressure. */
+    const iMax = iMaxRaw, N = 60;
+    const series = pressures.map((p, k) => {
+      const pts = [];
+      let limitAt = null;
+      for (let j = 0; j <= N; j++) {
+        const I = iMax * j / N;
+        const T = solveTemp(I, p, gas, geom, mat, Tw, emis);
+        const v = I * resistance(T, geom, mat);
+        pts.push({ i: I, v, T });
+        if (!limitAt && T >= Tlim && j > 0) limitAt = { i: I, v, T };
+      }
+      return { label: pLabel(p / 100), color: RAMP[k], pts, limitAt, p };
+    });
+
+    const vMax = niceMax(Math.max(...series.flatMap(s => s.pts.map(p => p.v))) * 1.05);
+    drawChart(series, iMax, vMax);
+
+    els.legend.innerHTML = series.map(s =>
+      `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('');
+
+    // Table view — the same numbers, for anyone the chart does not serve.
+    els.table.innerHTML = series.map(s => {
+      const last = s.pts[s.pts.length - 1];
+      return `<tr>` +
+        `<td><i style="background:${s.color}"></i>${s.label}</td>` +
+        `<td>${s.limitAt ? sig(s.limitAt.i, 4) + ' A' : 'not reached'}</td>` +
+        `<td>${s.limitAt ? sig(s.limitAt.v, 3) + ' V' : '—'}</td>` +
+        `<td>${sig(last.T - 273.15, 4)} °C</td>` +
+        `<td>${sig(last.v, 3)} V</td></tr>`;
+    }).join('');
+  }
+
+  ['len','lenUnit','mat','build','dia','nStrand','dStrand','gas','tube','twall','tmax',
+   'emis','imax','p1','p2','p3','p4','p5'].forEach(id => els[id].addEventListener('input', update));
+  update();
+})();
+</script>
+</body>
+</html>
