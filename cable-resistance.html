@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Cable Resistance &amp; Voltage Drop</title>
+<title>Conductor Resistance &amp; Voltage Drop</title>
 <style>
 /* ─── Design tokens (shared with Netherlayer) ─── */
 :root {
@@ -101,6 +101,10 @@ input[type=number] { -moz-appearance: textfield; }
 .stats div b { font-weight: 600; font-variant-numeric: tabular-nums; font-size: .95rem; }
 .split { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--sh-light); }
 .err { color: var(--red); font-size: 1rem; display: block; }
+.note {
+  color: var(--gold2); font-size: .86rem; display: block; margin-top: 12px;
+  padding: 10px 14px; border-left: 2px solid var(--gold3);
+}
 
 /* ─── Chart ─── */
 .chart-wrap { position: relative; margin-top: 10px; }
@@ -112,7 +116,7 @@ svg.chart .axis-title { fill: var(--muted); font-size: 11px; letter-spacing: .08
 svg.chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 svg.chart .crosshair { stroke: var(--muted); stroke-width: 1; }
 svg.chart .dot { stroke: var(--surface); stroke-width: 2; }
-svg.chart .limit-mark { fill: none; stroke-width: 2; }
+svg.chart .knee { fill: none; stroke-width: 2; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; }
 .legend span { display: flex; align-items: center; gap: 7px; font-size: .82rem; color: var(--text); font-variant-numeric: tabular-nums; }
@@ -124,7 +128,7 @@ svg.chart .limit-mark { fill: none; stroke-width: 2; }
   padding: 9px 11px; font-size: .8rem; min-width: 150px;
   box-shadow: 4px 4px 14px var(--sh-dark); transition: opacity .12s;
 }
-.tip h4 { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; margin-bottom: 5px; }
+.tip h4 { font-size: .78rem; letter-spacing: .04em; color: var(--text); font-weight: 600; margin-bottom: 5px; }
 .tip div { display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
 .tip i { width: 10px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
 .tip em { font-style: normal; color: var(--muted); margin-left: auto; }
@@ -149,14 +153,23 @@ footer a:hover { color: var(--gold2); }
 <div class="wrap">
 
   <header>
-    <h1>Cable Resistance &amp; Voltage Drop</h1>
-    <p>Conductor resistance over a run, and what the surrounding gas does to it.</p>
+    <h1>Conductor Resistance &amp; Voltage Drop</h1>
+    <p>Two ways to carry current down a run — a metal cable, or a column of ionised gas.</p>
   </header>
 
   <section class="panel nm-raised">
+    <div class="field">
+      <label for="kind">Conductor</label>
+      <select id="kind">
+        <option value="cable" selected>Metal cable — electrons through a solid</option>
+        <option value="tube">Gas-filled tube — current through the gas itself</option>
+      </select>
+      <p class="hint" id="kindHint">&nbsp;</p>
+    </div>
+
     <div class="grid2">
       <div class="field">
-        <label for="len">Cable length</label>
+        <label for="len">Run length</label>
         <div class="row">
           <input type="number" id="len" value="1000" min="0" step="any" inputmode="decimal"/>
           <select id="lenUnit">
@@ -167,9 +180,34 @@ footer a:hover { color: var(--gold2); }
         </div>
       </div>
       <div class="field">
+        <label for="imax">Current axis maximum</label>
+        <div class="row">
+          <input type="number" id="imax" value="2000" min="0" step="any" inputmode="decimal"/>
+          <select id="iUnit">
+            <option value="1" selected>A</option>
+            <option value="0.001">mA</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ Metal cable ══ -->
+  <section class="panel nm-raised" id="cablePanel">
+    <div class="caption" style="margin-bottom:16px">Metal cable</div>
+    <div class="grid2">
+      <div class="field">
         <label for="mat">Conductor material</label>
         <select id="mat"><!-- populated by script --></select>
         <p class="hint" id="matHint">&nbsp;</p>
+      </div>
+      <div class="field">
+        <label for="temp">Operating temperature</label>
+        <div class="row">
+          <input type="number" id="temp" value="20" step="any" inputmode="decimal"/>
+          <div class="unit-tag">°C</div>
+        </div>
+        <p class="hint">Resistivity rises with temperature — a hot cable drops more.</p>
       </div>
     </div>
 
@@ -207,90 +245,67 @@ footer a:hover { color: var(--gold2); }
     </div>
   </section>
 
-  <section class="panel nm-raised">
-    <div class="caption" style="margin-bottom:16px">Enclosure</div>
+  <!-- ══ Gas tube ══ -->
+  <section class="panel nm-raised" id="tubePanel" style="display:none">
+    <div class="caption" style="margin-bottom:16px">Gas-filled tube</div>
     <div class="grid2">
       <div class="field">
-        <label for="gas">Tube fill gas</label>
+        <label for="gas">Fill gas</label>
         <select id="gas"><!-- populated by script --></select>
         <p class="hint" id="gasHint">&nbsp;</p>
       </div>
       <div class="field">
-        <label for="tube">Tube inner diameter</label>
+        <label for="bore">Tube bore diameter</label>
         <div class="row">
-          <input type="number" id="tube" value="100" min="0" step="any" inputmode="decimal"/>
+          <input type="number" id="bore" value="15" min="0" step="any" inputmode="decimal"/>
           <div class="unit-tag">mm</div>
         </div>
       </div>
     </div>
 
-    <div class="grid2">
-      <div class="field">
-        <label for="twall">Tube wall temperature</label>
-        <div class="row">
-          <input type="number" id="twall" value="25" step="any" inputmode="decimal"/>
-          <div class="unit-tag">°C</div>
-        </div>
+    <div class="field">
+      <label for="cath">Cathode area</label>
+      <div class="row">
+        <input type="number" id="cath" value="1.77" min="0" step="any" inputmode="decimal"/>
+        <div class="unit-tag">cm²</div>
       </div>
-      <div class="field">
-        <label for="tmax">Conductor temperature limit</label>
-        <div class="row">
-          <input type="number" id="tmax" value="90" step="any" inputmode="decimal"/>
-          <div class="unit-tag">°C</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="grid2">
-      <div class="field">
-        <label for="emis">Conductor surface emissivity</label>
-        <input type="number" id="emis" value="0.5" min="0.01" max="1" step="any" inputmode="decimal"/>
-        <p class="hint">Bright metal ≈ 0.05, oxidised ≈ 0.7, black ≈ 0.95.</p>
-      </div>
-      <div class="field">
-        <label for="imax">Current axis maximum</label>
-        <div class="row">
-          <input type="number" id="imax" value="2000" min="1" step="any" inputmode="decimal"/>
-          <div class="unit-tag">A</div>
-        </div>
-      </div>
+      <p class="hint" id="cathHint">&nbsp;</p>
     </div>
 
     <div class="field">
       <label>Fill pressures for the five curves</label>
       <div class="grid5">
-        <input type="number" id="p1" value="0.001" min="0" step="any" inputmode="decimal"/>
-        <input type="number" id="p2" value="1" min="0" step="any" inputmode="decimal"/>
-        <input type="number" id="p3" value="50" min="0" step="any" inputmode="decimal"/>
-        <input type="number" id="p4" value="1000" min="0" step="any" inputmode="decimal"/>
-        <input type="number" id="p5" value="5000" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p1" value="0.1" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p2" value="0.5" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p3" value="2" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p4" value="10" min="0" step="any" inputmode="decimal"/>
+        <input type="number" id="p5" value="40" min="0" step="any" inputmode="decimal"/>
       </div>
-      <p class="hint">Millibar. 1000 mbar is one atmosphere; 0.001 mbar is a hard vacuum.</p>
+      <p class="hint">Torr. A glow discharge lives roughly between 0.05 and 50 Torr;
+         a neon sign runs near 10.</p>
     </div>
   </section>
 
   <section class="panel nm-raised">
-    <div class="caption">Conductor</div>
+    <div class="caption" id="statsCaption">Conductor</div>
     <div class="stats" id="stats"></div>
     <div id="err"></div>
+    <div id="modelNote"></div>
 
     <div class="split">
-      <div class="caption">Voltage drop against current</div>
+      <div class="caption" id="chartCaption">Voltage drop against current</div>
       <div class="chart-wrap">
-        <svg class="chart" id="chart" viewBox="0 0 760 400" role="img" aria-label="Voltage drop against current at five fill pressures"></svg>
+        <svg class="chart" id="chart" viewBox="0 0 760 400" role="img" aria-label="Voltage drop against current"></svg>
         <div class="tip" id="tip"></div>
       </div>
       <div class="legend" id="legend"></div>
     </div>
 
     <div class="split">
-      <div class="caption">At the temperature limit</div>
+      <div class="caption" id="tableCaption">Numbers behind the chart</div>
       <div class="scroll-x">
         <table class="data">
-          <thead><tr>
-            <th>Fill pressure</th><th>Max current</th><th>Drop there</th>
-            <th>Conductor temp at full scale</th><th>Drop at full scale</th>
-          </tr></thead>
+          <thead id="thead"></thead>
           <tbody id="table"></tbody>
         </table>
       </div>
@@ -298,13 +313,7 @@ footer a:hover { color: var(--gold2); }
   </section>
 
   <footer>
-    <p>Resistance is DC. The gas sets how well the conductor is cooled, cooling sets
-       its temperature, and temperature sets resistivity — which is why the same
-       cable drops more volts in vacuum than in gas at the same current.</p>
-    <p>Heat leaves by radiation and through the gas: conduction across the annulus,
-       corrected for temperature jump so it falls away with pressure once the mean
-       free path rivals the gap, plus natural convection once the Rayleigh number
-       supports it. Gas properties are scaled from 300 K values.</p>
+    <p id="footNote"></p>
     <p><a href="index.html">← Netherlayer</a> · <a href="capacitor.html">Capacitance</a> · <a href="launch-energy.html">Launch energy</a></p>
   </footer>
 
@@ -314,11 +323,10 @@ footer a:hover { color: var(--gold2); }
 (function () {
   'use strict';
 
-  const SIGMA = 5.670374419e-8;   // W/m²K⁴
-  const KB = 1.380649e-23;        // J/K
-  const RU = 8.314462618;         // J/mol·K
-  const ACCOM = 0.85;             // thermal accommodation coefficient
+  const TORR = 133.322;           // Pa
+  const ANODE_FALL = 15;          // V, typical
   const PACKING = 0.75;           // strand packing fraction in a round bundle
+  const ARC_RATIO = 100;          // j/j_n beyond which a glow goes over to an arc
 
   /* ρ at 20 °C (Ω·m), temperature coefficient (1/K), density (kg/m³) */
   const MATERIALS = [
@@ -338,30 +346,37 @@ footer a:hover { color: var(--gold2); }
     { name: 'Nichrome', rho: 1.10e-6, alpha: 0.0004, den: 8400 }
   ];
 
-  /* M (kg/mol), collision diameter (m), k and µ at 300 K, cp (J/kg·K), γ */
+  /* Glow-discharge parameters, iron cathode.
+       Vn   — normal cathode fall (V), tabulated
+       jn   — normal current density ÷ p², µA/(cm²·Torr²), tabulated
+       Ecol — positive-column gradient (V/cm) at the reference 1 Torr, 10 mm radius
+     Column gradient rises with ionisation energy, which is why helium costs three
+     times argon per metre. The reference values reproduce a real cold-cathode neon
+     sign: 15 mm bore at 10 Torr gives 730 V/m against a published ~700. */
   const GASES = [
-    { name: 'Argon', M: 0.039948, d: 3.64e-10, k: 0.0177, mu: 2.27e-5, cp: 520, g: 1.667 },
-    { name: 'Helium', M: 0.004003, d: 2.18e-10, k: 0.1513, mu: 1.99e-5, cp: 5193, g: 1.667 },
-    { name: 'Neon', M: 0.020180, d: 2.59e-10, k: 0.0491, mu: 3.18e-5, cp: 1030, g: 1.667 },
-    { name: 'Krypton', M: 0.083798, d: 4.16e-10, k: 0.00943, mu: 2.53e-5, cp: 248, g: 1.667 },
-    { name: 'Xenon', M: 0.131293, d: 4.85e-10, k: 0.00565, mu: 2.31e-5, cp: 158, g: 1.667 },
-    { name: 'Nitrogen', M: 0.028014, d: 3.75e-10, k: 0.0259, mu: 1.78e-5, cp: 1040, g: 1.4 },
-    { name: 'Dry air', M: 0.028960, d: 3.71e-10, k: 0.0262, mu: 1.85e-5, cp: 1005, g: 1.4 },
-    { name: 'Sulphur hexafluoride (SF₆)', M: 0.146055, d: 5.50e-10, k: 0.0136, mu: 1.53e-5, cp: 665, g: 1.09 }
+    { name: 'Neon', Vn: 150, jn: 6, Ecol: 2.0, ion: 21.6 },
+    { name: 'Argon', Vn: 165, jn: 160, Ecol: 1.0, ion: 15.8 },
+    { name: 'Helium', Vn: 150, jn: 2.2, Ecol: 3.0, ion: 24.6 },
+    { name: 'Krypton', Vn: 170, jn: 200, Ecol: 0.8, ion: 14.0 },
+    { name: 'Xenon', Vn: 175, jn: 250, Ecol: 0.6, ion: 12.1 },
+    { name: 'Nitrogen', Vn: 215, jn: 400, Ecol: 10, ion: 15.6 },
+    { name: 'Dry air', Vn: 269, jn: 240, Ecol: 15, ion: 15.6 }
   ];
 
   const $ = id => document.getElementById(id);
   const els = {};
-  ['len','lenUnit','mat','matHint','build','solidRow','strandRow','dia','nStrand','dStrand',
-   'strandHint','gas','gasHint','tube','twall','tmax','emis','imax','p1','p2','p3','p4','p5',
-   'stats','err','chart','tip','legend','table'].forEach(id => { els[id] = $(id); });
+  ['kind','kindHint','len','lenUnit','imax','iUnit','cablePanel','tubePanel','mat','matHint',
+   'temp','build','solidRow','strandRow','dia','nStrand','dStrand','strandHint','gas','gasHint',
+   'bore','cath','cathHint','p1','p2','p3','p4','p5','statsCaption','stats','err','modelNote',
+   'chartCaption','chart','tip','legend','tableCaption','thead','table','footNote']
+    .forEach(id => { els[id] = $(id); });
 
   MATERIALS.forEach((m, i) => els.mat.add(new Option(m.name, String(i))));
   GASES.forEach((g, i) => els.gas.add(new Option(g.name, String(i))));
   els.mat.value = '0';
   els.gas.value = '0';
 
-  const RAMP = ['--p1', '--p2', '--p3', '--p4', '--p5'].map(v =>
+  const RAMP = ['--p1','--p2','--p3','--p4','--p5'].map(v =>
     getComputedStyle(document.documentElement).getPropertyValue(v).trim());
 
   /* ─── Formatting ─── */
@@ -379,64 +394,41 @@ footer a:hover { color: var(--gold2); }
     if (e >= -3 && e <= 4) return sig(x, n);
     return `${(x / Math.pow(10, e)).toPrecision(n)} × 10${String(e).split('').map(c => SUP[c]).join('')}`;
   };
-  const pLabel = mbar => mbar >= 1000 ? `${sig(mbar / 1000, 3)} bar`
-    : mbar >= 1 ? `${sig(mbar, 3)} mbar`
-    : `${sci(mbar, 2)} mbar`;
+  const amps = a => a >= 1 ? `${sig(a, 3)} A` : a >= 1e-3 ? `${sig(a * 1e3, 3)} mA` : `${sig(a * 1e6, 3)} µA`;
 
-  /* ─── Thermal model ─────────────────────────────────────────────────────
-     Heat leaves the conductor two ways. Radiation does not care about the gas.
-     The gas path is conduction across the annulus with a temperature-jump term
-     that kills it off as the mean free path grows, plus convection once the
-     Rayleigh number is high enough to move the gas at all. */
-  function heatOut(Tc, Tw, p, gas, geom, emis) {
-    const r1 = geom.d1 / 2, r2 = geom.d2 / 2, L = geom.len;
-    const dT = Tc - Tw;
-    if (dT <= 0) return 0;
-
-    const rad = emis * SIGMA * Math.PI * geom.d1 * L * (Math.pow(Tc, 4) - Math.pow(Tw, 4));
-    if (p <= 0) return rad;
-
-    const Tf = (Tc + Tw) / 2;
-    const scale = Math.pow(Tf / 300, 0.7);      // both k and µ rise with temperature
-    const k = gas.k * scale, mu = gas.mu * scale;
-    const Pr = mu * gas.cp / k;
-    const rhoG = p * gas.M / (RU * Tf);
-
-    // Temperature jump — the gas stops touching the walls properly once its mean
-    // free path is comparable to the gap, which is what makes vacuum an insulator.
-    const mfp = KB * Tf / (Math.SQRT2 * Math.PI * gas.d * gas.d * p);
-    const jump = ((2 - ACCOM) / ACCOM) * (2 * gas.g / (gas.g + 1)) * (mfp / Pr);
-
-    // Natural convection in the annulus (Raithby–Hollands form). Ra ∝ p², so it
-    // fades out long before conduction does.
-    const delta = r2 - r1;
-    const Ra = 9.80665 * (1 / Tf) * dT * Math.pow(delta, 3) * rhoG * rhoG * gas.cp / (mu * k);
-    const Nu = Math.max(1, 0.386 * Math.pow(Pr / (0.861 + Pr), 0.25) * Math.pow(Math.max(Ra, 0), 0.25));
-
-    const denom = Math.log(r2 / r1) + jump * (1 / r1 + 1 / r2);
-    const gasQ = 2 * Math.PI * k * Nu * L * dT / denom;
-    return rad + gasQ;
-  }
-
-  // Equilibrium temperature: I²R(T) heats it, heatOut(T) cools it. Both are
-  // monotone in T, so bisection is safe and needs no starting guess.
-  function solveTemp(I, p, gas, geom, mat, Tw, emis) {
-    if (I <= 0) return Tw;
-    const gen = T => I * I * resistance(T, geom, mat);
-    let lo = Tw, hi = 3273;
-    if (gen(hi) - heatOut(hi, Tw, p, gas, geom, emis) > 0) return hi;   // runaway
-    for (let i = 0; i < 70; i++) {
-      const mid = (lo + hi) / 2;
-      if (gen(mid) - heatOut(mid, Tw, p, gas, geom, emis) > 0) lo = mid; else hi = mid;
-    }
-    return (lo + hi) / 2;
-  }
-
+  /* ─── Metal cable ───────────────────────────────────────────────────────
+     Ohm's law with a temperature-corrected resistivity. Nothing else — the
+     conductor is a conductor at every current, so the line is straight. */
   const resistance = (T, geom, mat) =>
-    mat.rho * (1 + mat.alpha * (T - 273.15 - 20)) * geom.len / geom.area;
+    mat.rho * (1 + mat.alpha * (T - 20)) * geom.len / geom.area;
+
+  /* ─── Gas tube ──────────────────────────────────────────────────────────
+     A glow discharge is three voltages in series: the cathode fall, the positive
+     column, and a small anode fall. The column is the part that scales with
+     length, and its gradient barely moves with current — which is why the tube
+     reads as a near-constant voltage rather than a resistance.
+
+     The current dependence is almost entirely the cathode. Below the normal glow
+     current the discharge simply covers more of the cathode and the voltage does
+     not move at all. Once it has covered the whole cathode it can only push
+     harder, and the fall climbs — the abnormal glow. */
+  function columnField(gas, pPa, rBore) {
+    const eRef = gas.Ecol * 100;                    // V/m at the reference point
+    const epRef = eRef / TORR;                      // (E/p) there
+    const pr = pPa * rBore, prRef = TORR * 0.01;    // pressure × radius similarity
+    return pPa * epRef * Math.pow(pr / prRef, -0.5);
+  }
+
+  function tubeVoltage(I, gas, pPa, rBore, len, cathArea) {
+    const jn = gas.jn * 5.626e-7 * pPa * pPa;       // A/m², from µA/(cm²·Torr²)
+    const In = jn * cathArea;                       // current that fills the cathode
+    const Vc = I <= In ? gas.Vn : gas.Vn * Math.pow(I / In, 0.4);
+    const Vcol = columnField(gas, pPa, rBore) * len;
+    return { V: Vc + Vcol + ANODE_FALL, Vc, Vcol, In, jn };
+  }
 
   /* ─── Chart ─── */
-  const W = 760, H = 400, M = { t: 14, r: 18, b: 48, l: 66 };
+  const W = 760, H = 400, M = { t: 14, r: 18, b: 48, l: 70 };
   const PW = W - M.l - M.r, PH = H - M.t - M.b;
 
   function niceMax(v) {
@@ -449,34 +441,46 @@ footer a:hover { color: var(--gold2); }
 
   let chartState = null;
 
-  function drawChart(series, iMax, vMax) {
-    const x = i => M.l + (i / iMax) * PW;
-    const y = v => M.t + PH - (v / vMax) * PH;
+  function drawChart(series, iMax, vMin, vMax, xLabel, logX, iMin) {
+    const lg = Math.log10;
+    const x = logX
+      ? i => M.l + (lg(Math.max(i, iMin) / iMin) / lg(iMax / iMin)) * PW
+      : i => M.l + (i / iMax) * PW;
+    const y = v => M.t + PH - ((v - vMin) / (vMax - vMin)) * PH;
     const parts = [];
-
-    // Hairline grid, solid — dashes read as thresholds.
     const yTicks = 5, xTicks = 5;
+
     for (let i = 0; i <= yTicks; i++) {
-      const v = vMax * i / yTicks, py = y(v);
+      const v = vMin + (vMax - vMin) * i / yTicks, py = y(v);
       parts.push(`<line class="grid-line" x1="${M.l}" y1="${py}" x2="${M.l + PW}" y2="${py}"/>`);
       parts.push(`<text class="tick" x="${M.l - 10}" y="${py + 4}" text-anchor="end">${sig(v, 3)}</text>`);
     }
-    for (let i = 0; i <= xTicks; i++) {
-      const c = iMax * i / xTicks, px = x(c);
-      parts.push(`<line class="grid-line" x1="${px}" y1="${M.t}" x2="${px}" y2="${M.t + PH}"/>`);
-      parts.push(`<text class="tick" x="${px}" y="${M.t + PH + 20}" text-anchor="middle">${sig(c, 3)}</text>`);
+    if (logX) {
+      // One gridline per decade, labelled in whatever unit keeps the number readable.
+      for (let e = Math.ceil(lg(iMin)); e <= Math.floor(lg(iMax)); e++) {
+        const c = Math.pow(10, e), px = x(c);
+        parts.push(`<line class="grid-line" x1="${px}" y1="${M.t}" x2="${px}" y2="${M.t + PH}"/>`);
+        parts.push(`<text class="tick" x="${px}" y="${M.t + PH + 20}" text-anchor="middle">${amps(c)}</text>`);
+      }
+    } else {
+      for (let i = 0; i <= xTicks; i++) {
+        const c = iMax * i / xTicks, px = x(c);
+        parts.push(`<line class="grid-line" x1="${px}" y1="${M.t}" x2="${px}" y2="${M.t + PH}"/>`);
+        parts.push(`<text class="tick" x="${px}" y="${M.t + PH + 20}" text-anchor="middle">${sig(c >= 1 ? c : c * 1000, 3)}</text>`);
+      }
     }
     parts.push(`<line class="axis-line" x1="${M.l}" y1="${M.t + PH}" x2="${M.l + PW}" y2="${M.t + PH}"/>`);
     parts.push(`<line class="axis-line" x1="${M.l}" y1="${M.t}" x2="${M.l}" y2="${M.t + PH}"/>`);
-    parts.push(`<text class="axis-title" x="${M.l + PW / 2}" y="${H - 8}" text-anchor="middle">Current (A)</text>`);
-    parts.push(`<text class="axis-title" transform="translate(16 ${M.t + PH / 2}) rotate(-90)" text-anchor="middle">Voltage drop (V)</text>`);
+    parts.push(`<text class="axis-title" x="${M.l + PW / 2}" y="${H - 8}" text-anchor="middle">${xLabel}</text>`);
+    parts.push(`<text class="axis-title" transform="translate(18 ${M.t + PH / 2}) rotate(-90)" text-anchor="middle">Voltage drop (V)</text>`);
 
     series.forEach(s => {
-      const pts = s.pts.map(p => `${x(p.i).toFixed(2)},${y(p.v).toFixed(2)}`).join(' ');
+      const drawn = s.pts.filter(p => p.valid !== false);
+      const pts = drawn.map(p => `${x(p.i).toFixed(2)},${y(p.v).toFixed(2)}`).join(' ');
       parts.push(`<polyline class="series" points="${pts}" stroke="${s.color}"/>`);
-      // Selective direct marking: only where the curve crosses the temperature limit.
-      if (s.limitAt) parts.push(
-        `<circle class="limit-mark" cx="${x(s.limitAt.i)}" cy="${y(s.limitAt.v)}" r="4.5" stroke="${s.color}"/>`);
+      // Selective direct marking: only the knee where normal glow becomes abnormal.
+      if (s.knee && s.knee.i <= iMax) parts.push(
+        `<circle class="knee" cx="${x(s.knee.i)}" cy="${y(s.knee.v)}" r="4.5" stroke="${s.color}"/>`);
     });
 
     parts.push(`<g id="hoverLayer" opacity="0"><line class="crosshair" y1="${M.t}" y2="${M.t + PH}"/>` +
@@ -484,7 +488,7 @@ footer a:hover { color: var(--gold2); }
     parts.push(`<rect id="hitArea" x="${M.l}" y="${M.t}" width="${PW}" height="${PH}" fill="transparent"/>`);
 
     els.chart.innerHTML = parts.join('');
-    chartState = { series, iMax, vMax, x, y };
+    chartState = { series, iMax, x, y };
     bindHover();
   }
 
@@ -498,8 +502,10 @@ footer a:hover { color: var(--gold2); }
     const move = ev => {
       const box = els.chart.getBoundingClientRect();
       const px = (ev.clientX - box.left) * (W / box.width);
-      const { series, iMax, x, y } = chartState;
+      const { series, x, y } = chartState;
       const frac = Math.min(1, Math.max(0, (px - M.l) / PW));
+      // Points are spaced evenly along whichever axis is drawn, so the fraction
+      // maps straight to an index either way.
       const n = series[0].pts.length;
       const idx = Math.round(frac * (n - 1));
       const cur = series[0].pts[idx].i;
@@ -511,12 +517,13 @@ footer a:hover { color: var(--gold2); }
       });
       layer.setAttribute('opacity', '1');
 
-      els.tip.innerHTML = `<h4>${sig(cur, 4)} A</h4>` + series.map(s =>
-        `<div><i style="background:${s.color}"></i>${s.label}<em>${sig(s.pts[idx].v, 3)} V</em></div>`).join('');
+      els.tip.innerHTML = `<h4>${amps(cur)}</h4>` + series.map(s => {
+        const pt = s.pts[idx];
+        const val = pt.valid === false ? 'arc' : `${sig(pt.v, 3)} V`;
+        return `<div><i style="background:${s.color}"></i>${s.label}<em>${val}</em></div>`;
+      }).join('');
       const boxW = els.tip.offsetWidth || 170;
       const left = (x(cur) / W) * box.width;
-      // Sit on whichever side of the crosshair has room, so the tooltip never
-      // covers the curves it is reading.
       const place = left > box.width / 2 ? left - boxW - 14 : left + 14;
       els.tip.style.left = Math.min(box.width - boxW - 4, Math.max(4, place)) + 'px';
       els.tip.style.top = '10px';
@@ -539,39 +546,46 @@ footer a:hover { color: var(--gold2); }
 
   function fail(msg) {
     els.err.innerHTML = `<span class="err">${msg}</span>`;
-    els.stats.innerHTML = '';
-    els.chart.innerHTML = '';
-    els.legend.innerHTML = '';
-    els.table.innerHTML = '';
+    els.stats.innerHTML = ''; els.chart.innerHTML = '';
+    els.legend.innerHTML = ''; els.table.innerHTML = ''; els.thead.innerHTML = '';
+    els.modelNote.innerHTML = '';
   }
 
+  const renderStats = pairs =>
+    els.stats.innerHTML = pairs.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+
   function update() {
+    const tube = els.kind.value === 'tube';
+    els.cablePanel.style.display = tube ? 'none' : '';
+    els.tubePanel.style.display = tube ? '' : 'none';
+    els.kindHint.textContent = tube
+      ? 'The gas is the conductor. It carries current only once ionised, so it behaves nothing like a resistor.'
+      : 'A solid conductor. Resistance is fixed at a given temperature, so voltage drop is proportional to current.';
+
+    const len = readPositive(els.len) * parseFloat(els.lenUnit.value);
+    const iMax = readPositive(els.imax) * parseFloat(els.iUnit.value);
+    if (!isFinite(len) || !isFinite(iMax)) return fail('Give a run length and a current axis maximum.');
+    els.err.innerHTML = '';
+
+    return tube ? runTube(len, iMax) : runCable(len, iMax);
+  }
+
+  function runCable(len, iMax) {
+    const mat = MATERIALS[Number(els.mat.value)];
+    const T = parseFloat(els.temp.value);
     const stranded = els.build.value === 'stranded';
     els.solidRow.style.display = stranded ? 'none' : '';
     els.strandRow.style.display = stranded ? '' : 'none';
-
-    const len = readPositive(els.len) * parseFloat(els.lenUnit.value);
-    const mat = MATERIALS[Number(els.mat.value)];
-    const gas = GASES[Number(els.gas.value)];
-    const tube = readPositive(els.tube) / 1000;
-    const Tw = parseFloat(els.twall.value) + 273.15;
-    const Tlim = parseFloat(els.tmax.value) + 273.15;
-    const emis = readPositive(els.emis);
-    const iMaxRaw = readPositive(els.imax);
-    const pressures = ['p1','p2','p3','p4','p5'].map(id => readPositive(els[id], true) * 100); // mbar → Pa
-
     els.matHint.textContent = `ρ₂₀ = ${sci(mat.rho, 3)} Ω·m, ${(mat.alpha * 100).toFixed(3)} %/K`;
-    els.gasHint.textContent = `k = ${sig(gas.k, 3)} W/m·K at 300 K — ${
-      gas.k > 0.05 ? 'a good conductor of heat for a gas' : 'a poor one, so it insulates as much as it cools'}`;
+    if (!isFinite(T)) return fail('Give an operating temperature.');
 
-    let area, d1, strandInfo = null;
+    let area, d1, strand = null;
     if (stranded) {
-      const n = readPositive(els.nStrand);
-      const ds = readPositive(els.dStrand) / 1000;
+      const n = readPositive(els.nStrand), ds = readPositive(els.dStrand) / 1000;
       if (!isFinite(n) || !isFinite(ds)) return fail('Give a strand count and a strand diameter.');
       area = n * Math.PI * ds * ds / 4;
       d1 = ds * Math.sqrt(n / PACKING);
-      strandInfo = { n, ds, surface: n * Math.PI * ds * len };
+      strand = { n, ds, surface: n * Math.PI * ds * len };
       els.strandHint.textContent = `Bundle ≈ ${sig(d1 * 1000, 3)} mm across at ${PACKING * 100} % packing.`;
     } else {
       const d = readPositive(els.dia) / 1000;
@@ -580,70 +594,143 @@ footer a:hover { color: var(--gold2); }
       d1 = d;
     }
 
-    if ([len, tube, emis, iMaxRaw].some(x => !isFinite(x)) || !isFinite(Tw) || !isFinite(Tlim)) {
-      return fail('Fill in every field with a number.');
-    }
-    if (pressures.some(x => !isFinite(x))) return fail('All five pressures must be zero or positive.');
-    if (tube <= d1) return fail(`The conductor is ${sig(d1 * 1000, 3)} mm across — it does not fit a ${sig(tube * 1000, 3)} mm tube.`);
-    if (Tlim <= Tw) return fail('The temperature limit must be above the tube wall temperature.');
-    els.err.innerHTML = '';
-
-    const geom = { len, area, d1, d2: tube };
-    const R20 = resistance(293.15, geom, mat);
-    const Rlim = resistance(Tlim, geom, mat);
-
+    const geom = { len, area };
+    const R = resistance(T, geom, mat);
     const solidSurface = Math.PI * d1 * len;
-    const stats = [
-      ['Conductor cross-section', `${sig(area * 1e6, 4)} mm²`],
-      ['Resistance at 20 °C', `${sci(R20, 4)} Ω`],
-      [`Resistance at ${sig(Tlim - 273.15, 3)} °C`, `${sci(Rlim, 4)} Ω`],
-      ['Resistance per km', `${sci(R20 * 1000 / len, 4)} Ω/km`],
-      ['Conductor outer diameter', `${sig(d1 * 1000, 4)} mm`],
-      ['Conductor mass', `${sig(area * len * mat.den, 4)} kg`]
-    ];
-    if (strandInfo) {
-      stats.push(['Strand surface area, all strands', `${sig(strandInfo.surface, 4)} m²`]);
-      stats.push(['Against one solid conductor', `${sig(strandInfo.surface / solidSurface, 3)}× (${sig(solidSurface, 4)} m²)`]);
-    } else {
-      stats.push(['Conductor surface area', `${sig(solidSurface, 4)} m²`]);
-    }
-    els.stats.innerHTML = stats.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
 
-    /* Sweep current for each pressure. */
-    const iMax = iMaxRaw, N = 60;
+    const stats = [
+      ['Cross-section', `${sig(area * 1e6, 4)} mm²`],
+      [`Resistance at ${sig(T, 3)} °C`, `${sci(R, 4)} Ω`],
+      ['Resistance per km', `${sci(R * 1000 / len, 4)} Ω/km`],
+      ['Outer diameter', `${sig(d1 * 1000, 4)} mm`],
+      ['Conductor mass', `${sig(area * len * mat.den, 4)} kg`],
+      ['Drop at full scale', `${sig(iMax * R, 4)} V`],
+      ['Loss at full scale', `${sci(iMax * iMax * R, 4)} W`]
+    ];
+    if (Math.abs(T - 20) > 0.01) stats.splice(2, 0, ['Resistance at 20 °C', `${sci(resistance(20, geom, mat), 4)} Ω`]);
+    if (strand) {
+      stats.push(['Surface area, all strands', `${sig(strand.surface, 4)} m²`]);
+      stats.push(['Against one solid conductor', `${sig(strand.surface / solidSurface, 3)}× (${sig(solidSurface, 4)} m²)`]);
+    } else {
+      stats.push(['Surface area', `${sig(solidSurface, 4)} m²`]);
+    }
+    els.statsCaption.textContent = 'Metal cable';
+    renderStats(stats);
+    els.modelNote.innerHTML = '';
+
+    const N = 60, pts = [];
+    for (let j = 0; j <= N; j++) { const I = iMax * j / N; pts.push({ i: I, v: I * R }); }
+    const series = [{ label: 'Voltage drop', color: RAMP[2], pts, knee: null }];
+
+    els.chartCaption.textContent = 'Voltage drop against current';
+    drawChart(series, iMax, 0, niceMax(iMax * R * 1.05), iMax >= 1 ? 'Current (A)' : 'Current (mA)', false);
+    // One series needs no legend — the caption names it.
+    els.legend.innerHTML = '';
+
+    els.tableCaption.textContent = 'Drop along the run';
+    els.thead.innerHTML = '<tr><th>Current</th><th>Voltage drop</th><th>Power lost</th><th>Drop per km</th></tr>';
+    els.table.innerHTML = [0.25, 0.5, 0.75, 1].map(f => {
+      const I = iMax * f;
+      return `<tr><td>${amps(I)}</td><td>${sig(I * R, 4)} V</td>` +
+        `<td>${sci(I * I * R, 4)} W</td><td>${sig(I * R * 1000 / len, 4)} V/km</td></tr>`;
+    }).join('');
+
+    els.footNote.textContent = 'A metal cable obeys Ohm’s law: resistance is set by material, ' +
+      'geometry and temperature, and the drop is simply I × R. Resistance here is DC — no skin or proximity effect.';
+  }
+
+  function runTube(len, iMax) {
+    const gas = GASES[Number(els.gas.value)];
+    const bore = readPositive(els.bore) / 1000;
+    const cathArea = readPositive(els.cath) / 1e4;   // cm² → m²
+    const pressures = ['p1','p2','p3','p4','p5'].map(id => readPositive(els[id]) * TORR);
+    if (!isFinite(bore) || !isFinite(cathArea)) return fail('Give a bore diameter and a cathode area.');
+    if (pressures.some(x => !isFinite(x))) return fail('All five pressures must be positive.');
+
+    const r = bore / 2;
+    els.gasHint.textContent = `Ionisation energy ${gas.ion} eV — ${
+      gas.ion > 20 ? 'hard to ionise, so it costs more volts per metre' : 'easy to ionise, so the column is cheap'}`;
+    els.cathHint.textContent = `Bore cross-section is ${sig(Math.PI * r * r * 1e4, 3)} cm². ` +
+      'A bigger cathode stays in the flat normal-glow region to higher current.';
+
+    els.statsCaption.textContent = 'Gas column';
+    const mid = pressures[2];
+    renderStats([
+      ['Fill gas', gas.name],
+      ['Normal cathode fall', `${gas.Vn} V`],
+      ['Anode fall (assumed)', `${ANODE_FALL} V`],
+      ['Column gradient at ' + sig(mid / TORR, 3) + ' Torr', `${sig(columnField(gas, mid, r), 4)} V/m`],
+      ['Column voltage there', `${sig(columnField(gas, mid, r) * len, 4)} V`],
+      ['Bore', `${sig(bore * 1000, 3)} mm`]
+    ]);
+
+    /* A discharge characteristic runs over decades of current, so sample and plot
+       it logarithmically — on a linear axis the whole normal-glow plateau collapses
+       onto the left edge and the knee is invisible. */
+    const iMin = Math.pow(10, Math.floor(Math.log10(iMax)) - 5);
+    const N = 160;
     const series = pressures.map((p, k) => {
       const pts = [];
-      let limitAt = null;
+      let knee = null;
       for (let j = 0; j <= N; j++) {
-        const I = iMax * j / N;
-        const T = solveTemp(I, p, gas, geom, mat, Tw, emis);
-        const v = I * resistance(T, geom, mat);
-        pts.push({ i: I, v, T });
-        if (!limitAt && T >= Tlim && j > 0) limitAt = { i: I, v, T };
+        const I = iMin * Math.pow(iMax / iMin, j / N);
+        const t = tubeVoltage(I, gas, p, r, len, cathArea);
+        // Past roughly a hundred times the normal current density the cathode runs
+        // hot enough to emit thermionically and the glow collapses into an arc.
+        // The model does not cover that, so the curve stops rather than pretending.
+        pts.push({ i: I, v: t.V, valid: I <= ARC_RATIO * t.In });
+        if (!knee && I >= t.In) knee = { i: t.In, v: t.V, In: t.In };
       }
-      return { label: pLabel(p / 100), color: RAMP[k], pts, limitAt, p };
+      const t0 = tubeVoltage(iMax, gas, p, r, len, cathArea);
+      return { label: `${sig(p / TORR, 3)} Torr`, color: RAMP[k], pts, knee, info: t0, p };
     });
 
-    const vMax = niceMax(Math.max(...series.flatMap(s => s.pts.map(p => p.v))) * 1.05);
-    drawChart(series, iMax, vMax);
-
+    const all = series.flatMap(s => s.pts.filter(q => q.valid).map(q => q.v));
+    const vMax = niceMax(Math.max(...all) * 1.05);
+    els.chartCaption.textContent = 'Voltage across the tube against current (log scale)';
+    drawChart(series, iMax, 0, vMax, 'Current', true, iMin);
     els.legend.innerHTML = series.map(s =>
       `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('');
 
-    // Table view — the same numbers, for anyone the chart does not serve.
+    els.tableCaption.textContent = 'Where each curve turns';
+    els.thead.innerHTML = '<tr><th>Fill pressure</th><th>Column gradient</th><th>Column voltage</th>' +
+      '<th>Normal glow up to</th><th>Glow gives out at</th><th>Volts there</th></tr>';
     els.table.innerHTML = series.map(s => {
-      const last = s.pts[s.pts.length - 1];
-      return `<tr>` +
-        `<td><i style="background:${s.color}"></i>${s.label}</td>` +
-        `<td>${s.limitAt ? sig(s.limitAt.i, 4) + ' A' : 'not reached'}</td>` +
-        `<td>${s.limitAt ? sig(s.limitAt.v, 3) + ' V' : '—'}</td>` +
-        `<td>${sig(last.T - 273.15, 4)} °C</td>` +
-        `<td>${sig(last.v, 3)} V</td></tr>`;
+      const E = columnField(gas, s.p, r);
+      const arcAt = ARC_RATIO * s.info.In;
+      const last = [...s.pts].reverse().find(q => q.valid);
+      return `<tr><td><i style="background:${s.color}"></i>${s.label}</td>` +
+        `<td>${sig(E, 4)} V/m</td><td>${sig(E * len, 4)} V</td>` +
+        `<td>${amps(s.info.In)}</td>` +
+        `<td>${arcAt > iMax ? 'beyond axis' : amps(arcAt)}</td>` +
+        `<td>${last ? sig(last.v, 4) + ' V' : '—'}</td></tr>`;
     }).join('');
+
+    els.modelNote.innerHTML = '<span class="note">A gas column is not a resistor. Below the ' +
+      'marked knee the discharge simply spreads over more of the cathode and the voltage barely ' +
+      'moves — more current for free. Past the knee it has run out of cathode and the fall climbs. ' +
+      'Raising the pressure costs volts per metre but lets the tube carry more current before it ' +
+      'turns the corner. Each curve stops where the current density reaches about a hundred times the normal value, since a real discharge collapses into an arc around there and this model does not follow it.</span>';
+
+    els.footNote.textContent = 'Glow-discharge model: normal cathode fall and normal current density ' +
+      'are tabulated values for an iron cathode; the positive-column gradient is an empirical fit ' +
+      'anchored so a 15 mm bore of neon at 10 Torr gives 730 V/m against a published ~700. Valid in ' +
+      'the glow regime — it does not model the Townsend dark discharge below it or the arc above it.';
   }
 
-  ['len','lenUnit','mat','build','dia','nStrand','dStrand','gas','tube','twall','tmax',
-   'emis','imax','p1','p2','p3','p4','p5'].forEach(id => els[id].addEventListener('input', update));
+  ['kind','len','lenUnit','imax','iUnit','mat','temp','build','dia','nStrand','dStrand',
+   'gas','bore','cath','p1','p2','p3','p4','p5'].forEach(id => els[id].addEventListener('input', update));
+  els.kind.addEventListener('change', () => {
+    // Discharge currents are milliamps; cable currents are amps.
+    if (els.kind.value === 'tube') {
+      els.imax.value = '100'; els.iUnit.value = '0.001';
+      els.len.value = '1'; els.lenUnit.value = '1';       // discharge tubes are metres
+    } else {
+      els.imax.value = '2000'; els.iUnit.value = '1';
+      els.len.value = '1000'; els.lenUnit.value = '1';
+    }
+    update();
+  });
   update();
 })();
 </script>
