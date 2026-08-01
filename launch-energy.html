@@ -134,6 +134,10 @@ table.budget td { padding: 6px 8px; border-top: 1px solid var(--sh-light); font-
 table.budget td:last-child, table.budget th:last-child { text-align: right; }
 table.budget tr.total td { border-top: 2px solid var(--sh-light); color: var(--gold2); font-weight: 600; }
 table.budget tr.credit td { color: var(--green); }
+table.profile { font-size: .82rem; min-width: 640px; }
+table.profile td, table.profile th { white-space: nowrap; }
+table.profile td:last-child, table.profile th:last-child { text-align: left; white-space: normal; min-width: 170px; }
+table.profile tr.quiet td { color: var(--muted); }
 .scroll-x { overflow-x: auto; }
 
 footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: var(--gap); }
@@ -347,6 +351,20 @@ footer a:hover { color: var(--gold2); }
       <div class="stats" id="stats"></div>
     </div>
 
+    <div class="split" id="profileWrap" style="display:none">
+      <div class="caption" style="text-align:left">Flight through the atmosphere</div>
+      <div class="note" id="plasmaNote"></div>
+      <div class="scroll-x">
+        <table class="budget profile">
+          <thead><tr>
+            <th>Layer</th><th>Entered at</th><th>Speed vs air</th><th>Air density</th>
+            <th>Energy lost</th><th>Peak heating</th><th>Gas ahead of it</th>
+          </tr></thead>
+          <tbody id="profile"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="split">
       <div class="caption" style="text-align:left" id="tableCaption">Δv budget</div>
       <div class="scroll-x">
@@ -440,7 +458,7 @@ footer a:hover { color: var(--gold2); }
   ['mass','massUnit','dest','alt','mode','lat','latHint','method','methodHint','isp','prop',
    'stages','sigma','dia','diaMode','diaHint','cd','twr','rocketAdv','emAdv','emDia','emCd',
    'emAngle','emSite','emLen','emEff','emBcHint','emGap','emRail','emGapHint','emSiteHint','out','outAlt','outErr','stats','tableCaption',
-   'tableCol','budget'].forEach(id => { els[id] = $(id); });
+   'tableCol','budget','profileWrap','profile','plasmaNote'].forEach(id => { els[id] = $(id); });
 
   /* Chemical energy per kg of propellant mixture, with the specific impulse that
      propellant realistically delivers. The two travel together — comparing energy
@@ -600,6 +618,7 @@ footer a:hover { color: var(--gold2); }
     els.outErr.innerHTML = msg ? `<span class="error">${msg}</span>` : '';
     els.stats.innerHTML = '';
     els.budget.innerHTML = '';
+    els.profileWrap.style.display = 'none';
   }
 
   const renderStats = pairs => {
@@ -614,6 +633,7 @@ footer a:hover { color: var(--gold2); }
 
   /* ─── Rocket ─── */
   function runRocket(payload, r, mode, vRot, altKm) {
+    els.profileWrap.style.display = 'none';
     const isp = readPositive(els.isp);
     const sigma = readPositive(els.sigma);
     const autoDia = els.diaMode.value === 'auto';
@@ -691,12 +711,67 @@ footer a:hover { color: var(--gold2); }
      8 km/s the ground falls away fast enough to change the answer. Drag scales
      with v², and a gun launch starts at full speed in the densest air, so the
      projectile's ballistic coefficient dominates everything. */
-  function ballistic(v0, angleDeg, siteAlt, targetAlt, cdAm, vRot) {
+  /* Named layers of the atmosphere, so the flight can be reported the way the air
+     is actually structured rather than as one undifferentiated climb. */
+  const LAYERS = [
+    { name: 'Troposphere', top: 11000 },
+    { name: 'Tropopause', top: 20000 },
+    { name: 'Stratosphere', top: 47000 },
+    { name: 'Stratopause', top: 51000 },
+    { name: 'Mesosphere', top: 71000 },
+    { name: 'Mesopause', top: 85000 },
+    { name: 'Lower thermosphere', top: 120000 },
+    { name: 'Thermosphere', top: 600000 },
+    { name: 'Exosphere', top: Infinity }
+  ];
+  const layerOf = alt => { for (let i = 0; i < LAYERS.length; i++) if (alt < LAYERS[i].top) return i; return LAYERS.length - 1; };
+
+  const SG_K = 1.7415e-4;      // Sutton–Graves constant, SI
+  const M_AIR = 4.81e-26;      // kg, mean air molecule
+  const D_AIR = 3.7e-10;       // m, collision diameter
+  const Q_APOLLO = 4.8e6;      // W/m², Apollo 4 peak convective heating, for scale
+
+  // Knudsen number — mean free path against body size. Above ~10 the air stops
+  // behaving as a fluid and no shock layer forms at all.
+  function knudsen(rho, L) {
+    if (rho <= 0) return Infinity;
+    const n = rho / M_AIR;
+    const mfp = 1 / (Math.SQRT2 * Math.PI * D_AIR * D_AIR * n);
+    return mfp / L;
+  }
+
+  /* What the gas ahead of the projectile is actually doing. The thresholds are the
+     standard ones for air: O₂ starts coming apart around 2 km/s, N₂ around 5, and
+     the shock layer is ionized enough to black out radio above about 7. */
+  function shockState(v, kn) {
+    if (kn > 10) return 'free molecular — no shock layer';
+    const km = v / 1000;
+    let s;
+    if (km < 1.5) s = 'cold gas';
+    else if (km < 3) s = 'vibrationally excited';
+    else if (km < 5) s = 'O₂ dissociating';
+    else if (km < 7) s = 'N₂ dissociating, weakly ionized';
+    else if (km < 9) s = 'ionized plasma — radio blackout';
+    else if (km < 12) s = 'strongly ionized, radiating';
+    else s = 'radiation dominated';
+    if (kn > 0.1) s += ' (rarefied)';
+    else if (kn > 0.01) s += ' (slip flow)';
+    return s;
+  }
+
+  /* One impulse at the pad, then an unpowered coast. Integrated in the inertial
+     frame in Cartesian coordinates so Earth's curvature is handled properly — at
+     8 km/s the ground falls away fast enough to change the answer. Drag scales
+     with v², and a gun launch starts at full speed in the densest air, so the
+     projectile's ballistic coefficient dominates everything. */
+  function ballistic(v0, angleDeg, siteAlt, targetAlt, cdAm, vRot, noseR) {
     const th = angleDeg * Math.PI / 180;
     let x = 0, y = R_E + siteAlt;
     let vx = v0 * Math.cos(th) + vRot;   // eastward launch rides the rotation
     let vy = v0 * Math.sin(th);
     let t = 0, dragLoss = 0, maxG = 0, maxQ = 0, maxQalt = 0, apogee = siteAlt;
+    let maxHeat = 0, heatLoad = 0, tAtmo = 0;
+    const bands = LAYERS.map(l => ({ name: l.name, seen: false, v: 0, alt: 0, rho: 0, kn: 0, loss: 0, maxHeat: 0 }));
 
     while (t < 20000) {
       const r = Math.hypot(x, y);
@@ -707,38 +782,62 @@ footer a:hover { color: var(--gold2); }
       if (alt >= targetAlt) {
         const vr = (x * vx + y * vy) / r;              // radial (climbing)
         const vt = Math.abs(x * vy - y * vx) / r;      // tangential (orbital)
-        return { reached: true, speed: v, vr, vt, dragLoss, maxG, maxQ, maxQalt, t, apogee };
+        return { reached: true, speed: v, vr, vt, dragLoss, maxG, maxQ, maxQalt, maxHeat, heatLoad, tAtmo, bands, t, apogee };
       }
       const vrad = (x * vx + y * vy) / r;
-      if (vrad < 0 || alt < siteAlt - 1000) return { reached: false, apogee, dragLoss, maxG, maxQ, maxQalt };
+      if (vrad < 0 || alt < siteAlt - 1000) return { reached: false, apogee, dragLoss, maxG, maxQ, maxQalt, maxHeat, heatLoad, tAtmo, bands };
 
       const rho = density(alt);
-      const q = 0.5 * rho * v * v;
+      /* The atmosphere turns with the Earth, so drag and heating answer to the
+         air-relative speed rather than the inertial one. At the muzzle that is
+         exactly the ground-relative muzzle velocity, which is what a gun measures. */
+      const vAtm = vRot * r / R_E;
+      // Launch is toward +x, which is clockwise here, so the co-rotating air runs
+      // along (y, −x)/r. Getting this backwards adds the rotation instead of
+      // removing it and the muzzle row stops matching the muzzle velocity.
+      const wx = vx - vAtm * (y / r);
+      const wy = vy + vAtm * (x / r);
+      const w = Math.max(Math.hypot(wx, wy), 1e-6);
+      const q = 0.5 * rho * w * w;
       const aDrag = q * cdAm;
       if (q > maxQ) { maxQ = q; maxQalt = alt; }
       if (aDrag / G0 > maxG) maxG = aDrag / G0;
 
+      // Sutton–Graves stagnation-point convective heating, the standard correlation.
+      const heat = SG_K * Math.sqrt(rho / noseR) * w * w * w;
+      if (heat > maxHeat) maxHeat = heat;
+
+      const bd = bands[layerOf(alt)];
+      if (!bd.seen) { bd.seen = true; bd.v = w; bd.alt = alt; bd.rho = rho; bd.kn = knudsen(rho, noseR * 2); }
+      if (heat > bd.maxHeat) bd.maxHeat = heat;
+
       const g3 = GM / (r * r * r);
-      const ax = -g3 * x - aDrag * vx / v;
-      const ay = -g3 * y - aDrag * vy / v;
+      const ax = -g3 * x - aDrag * wx / w;
+      const ay = -g3 * y - aDrag * wy / w;
 
       const atot = Math.hypot(ax, ay);
       let dt = Math.min(alt > 150000 ? 2 : 0.25, 100 / Math.max(v, 1));
       if (atot > 0) dt = Math.min(dt, 0.01 * v / atot);
       dt = Math.max(dt, 1e-4);
 
-      dragLoss += aDrag * v * dt;   // J/kg
+      // Drag opposes the air-relative velocity, but the energy it takes comes out
+      // of the body's own motion — so the loss is that force along the body's path.
+      const lossRate = aDrag * (wx * vx + wy * vy) / w;
+      dragLoss += lossRate * dt;   // J/kg
+      bd.loss += lossRate * dt;
+      heatLoad += heat * dt;
+      if (alt < 100000) tAtmo += dt;
       vx += ax * dt; vy += ay * dt; x += vx * dt; y += vy * dt; t += dt;
     }
-    return { reached: false, apogee, dragLoss, maxG, maxQ, maxQalt };
+    return { reached: false, apogee, dragLoss, maxG, maxQ, maxQalt, maxHeat, heatLoad, tAtmo, bands };
   }
 
   /* Bisect for the muzzle speed that arrives at the target with the speed it needs.
      Undershooting reads negative whether it fell short on altitude or on speed, so
      the sign alone is enough to bracket. */
-  function solveMuzzle(vNeed, angle, siteAlt, targetAlt, cdAm, vRot) {
+  function solveMuzzle(vNeed, angle, siteAlt, targetAlt, cdAm, vRot, noseR) {
     const f = v0 => {
-      const s = ballistic(v0, angle, siteAlt, targetAlt, cdAm, vRot);
+      const s = ballistic(v0, angle, siteAlt, targetAlt, cdAm, vRot, noseR);
       return s.reached ? { val: s.speed - vNeed, s } : { val: -vNeed - 1 - (targetAlt - s.apogee) / 1000, s };
     };
     let lo = 100, hi = 60000;
@@ -751,6 +850,7 @@ footer a:hover { color: var(--gold2); }
     const out = f(hi);
     return { v0: hi, flight: out.s };
   }
+
 
   function runEM(payload, r, mode, vRot, altKm) {
     const dia = readPositive(els.emDia);
@@ -792,7 +892,8 @@ footer a:hover { color: var(--gold2); }
     const vCirc = Math.sqrt(GM / r);
     const vNeed = mode === 'orbit' ? vCirc : 0;
 
-    const sol = solveMuzzle(vNeed, angle, muzzleAlt, targetAlt, cdAm, vRot);
+    const noseR = dia / 2;
+    const sol = solveMuzzle(vNeed, angle, muzzleAlt, targetAlt, cdAm, vRot, noseR);
     if (!sol) {
       return clearOutputs('No muzzle velocity gets there. The projectile is too light for its frontal area — ' +
         'the air strips speed faster than the launcher can add it. Make it denser or narrower, raise the launch angle, or start higher up.');
@@ -842,8 +943,52 @@ footer a:hover { color: var(--gold2); }
       ['Rail current', eng(current, 'A')],
       ['Rail repulsion', `${eng(railRepel, 'N')} per metre`],
       ['Back-EMF at the muzzle', eng(backEmf, 'V')],
-      ['Muzzle altitude', `${sig(muzzleAlt, 4)} m`]
+      ['Muzzle altitude', `${sig(muzzleAlt, 4)} m`],
+      ['Peak heating (stagnation)', `${sig(f.maxHeat / 1e6, 4)} MW/m²`],
+      ['Total heat load', `${sig(f.heatLoad / 1e6, 4)} MJ/m²`],
+      ['Stagnation enthalpy at muzzle', `${sig(sol.v0 * sol.v0 / 2 / 1e6, 4)} MJ/kg`]
     ]);
+
+    /* Per-layer flight profile. Layers the projectile never entered, or crossed
+       without losing anything worth printing, are dropped rather than padded. */
+    const totalLoss = f.dragLoss || 1;
+    const rows = f.bands.filter(bd => bd.seen).map(bd => {
+      const share = 100 * bd.loss / totalLoss;
+      const quiet = share < 0.05;
+      return `<tr class="${quiet ? 'quiet' : ''}">` +
+        `<td>${bd.name}</td>` +
+        `<td>${sig(bd.alt / 1000, 3)} km</td>` +
+        `<td>${sig(bd.v / 1000, 4)} km/s</td>` +
+        `<td>${sci(bd.rho, 3)} kg/m³</td>` +
+        `<td>${eng(bd.loss * payload, 'J')} (${share < 0.01 ? '<0.01' : sig(share, 3)} %)</td>` +
+        `<td>${bd.maxHeat > 1e5 ? sig(bd.maxHeat / 1e6, 3) + ' MW/m²' : sig(bd.maxHeat / 1e3, 3) + ' kW/m²'}</td>` +
+        `<td>${shockState(bd.v, bd.kn)}</td></tr>`;
+    }).join('');
+    els.profile.innerHTML = rows;
+    els.profileWrap.style.display = '';
+
+    /* Say plainly what the numbers mean: where the energy went, and whether the
+       air ahead is still air. */
+    const h0 = sol.v0 * sol.v0 / 2;
+    const denseShare = f.bands.filter(bd => bd.seen && bd.alt < 51000).reduce((a2, bd) => a2 + bd.loss, 0) / totalLoss;
+    const ion = sol.v0 > 7000;
+    els.plasmaNote.innerHTML =
+      `Drag power goes as <b>v³</b>, so nearly all of the loss happens in the first few layers — ` +
+      `${sig(100 * denseShare, 3)} % of it below the stratopause, in the ${sig(f.tAtmo, 3)} s the projectile ` +
+      `spends below 100 km.<br><br>` +
+      `The shock layer carries the full stagnation enthalpy of <b>${sig(h0 / 1e6, 4)} MJ/kg</b>. ` +
+      (ion
+        ? `Air dissociates above roughly 3 km/s and ionizes above roughly 7 km/s, so at ${sig(sol.v0 / 1000, 4)} km/s ` +
+          `the gas ahead is <b>not hot air but a plasma</b> — O₂ and N₂ torn apart and stripped of electrons, ` +
+          `radiating as well as conducting heat into the nose. That is the radio-blackout regime.`
+        : `At ${sig(sol.v0 / 1000, 4)} km/s the shock heats and partly dissociates the air but does not ionize it strongly, ` +
+          `so heating stays convective and radio contact survives.`) +
+      `<br><br>Peak stagnation heating reaches <b>${sig(f.maxHeat / 1e6, 4)} MW/m²</b>, ` +
+      `${f.maxHeat > Q_APOLLO
+        ? `about ${sig(f.maxHeat / Q_APOLLO, 3)}× the Apollo re-entry peak`
+        : `around ${sig(100 * f.maxHeat / Q_APOLLO, 3)} % of the Apollo re-entry peak`} ` +
+      `(Sutton–Graves, ${sig(noseR, 3)} m nose radius). The energy lost to drag is not stored anywhere — ` +
+      `it goes into heating and ionizing the air, and into the projectile.`;
 
     renderTable('Energy budget', 'Energy', [
       ['Delivered by the launcher (muzzle)', eng(eMuzzle, 'J')],
