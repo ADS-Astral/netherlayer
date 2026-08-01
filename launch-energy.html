@@ -296,7 +296,25 @@ footer a:hover { color: var(--gold2); }
             <input type="number" id="emSite" value="0" min="0" step="any" inputmode="decimal"/>
             <div class="unit-tag">m</div>
           </div>
-          <p class="hint">Starting up a mountain skips the densest air.</p>
+          <p class="hint" id="emSiteHint">Breech altitude. The bore is evacuated, so drag starts at the muzzle — which an inclined barrel lifts above the breech.</p>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="emGap">Rail spacing (bore)</label>
+          <div class="row">
+            <input type="number" id="emGap" value="0.5" min="0" step="any" inputmode="decimal"/>
+            <div class="unit-tag">m</div>
+          </div>
+          <p class="hint" id="emGapHint">&nbsp;</p>
+        </div>
+        <div class="field">
+          <label for="emRail">Rail height</label>
+          <div class="row">
+            <input type="number" id="emRail" value="0.5" min="0" step="any" inputmode="decimal"/>
+            <div class="unit-tag">m</div>
+          </div>
+          <p class="hint">Taller rails against a narrower bore lower the inductance gradient.</p>
         </div>
       </div>
       <div class="grid2">
@@ -346,6 +364,9 @@ footer a:hover { color: var(--gold2); }
        the vehicle is moving at each altitude — not a fixed allowance.</p>
     <p>A preliminary-design estimate. Real vehicles differ with staging, throttling,
        trajectory shaping and engine performance that varies with altitude.</p>
+    <p>The bore is taken to be evacuated, so the projectile meets no air until the
+       muzzle. Rail force follows F = ½·L′·I² at constant acceleration, with the
+       inductance gradient L′ from the rail spacing and height.</p>
     <p>A gun launch has to survive things this model does not compute: stagnation
        pressure and aeroheating at hypersonic speed in dense air, and the barrel
        acceleration shown. Drag here is the energy cost alone, not a survivability
@@ -366,6 +387,7 @@ footer a:hover { color: var(--gold2); }
   const G0   = 9.80665;          // m/s²
   const KWH  = 3.6e6;            // J per kWh
   const WH   = 3600;             // J per Wh
+  const MU0  = 4e-7 * Math.PI;   // H/m, vacuum permeability
   const R_PARK = R_E + 200000;   // m, parking orbit for high-orbit transfers
 
   /* 1976 US Standard Atmosphere as piecewise exponentials:
@@ -417,7 +439,7 @@ footer a:hover { color: var(--gold2); }
   const els = {};
   ['mass','massUnit','dest','alt','mode','lat','latHint','method','methodHint','isp','prop',
    'stages','sigma','dia','diaMode','diaHint','cd','twr','rocketAdv','emAdv','emDia','emCd',
-   'emAngle','emSite','emLen','emEff','emBcHint','out','outAlt','outErr','stats','tableCaption',
+   'emAngle','emSite','emLen','emEff','emBcHint','emGap','emRail','emGapHint','emSiteHint','out','outAlt','outErr','stats','tableCaption',
    'tableCol','budget'].forEach(id => { els[id] = $(id); });
 
   /* Chemical energy per kg of propellant mixture, with the specific impulse that
@@ -737,13 +759,29 @@ footer a:hover { color: var(--gold2); }
     const siteAlt = readPositive(els.emSite, true);
     const len = readPositive(els.emLen);
     const effPct = readPositive(els.emEff);
+    const gap = readPositive(els.emGap);
+    const railH = readPositive(els.emRail);
 
-    if ([dia, cd, angle, siteAlt, len, effPct].some(x => !isFinite(x))) {
+    if ([dia, cd, angle, siteAlt, len, effPct, gap, railH].some(x => !isFinite(x))) {
       return clearOutputs('Fill in every launcher field with a positive number.');
     }
     if (angle >= 90 || angle <= 0) return clearOutputs('Launch angle must be between 0 and 90 degrees.');
     if (effPct > 100) return clearOutputs('Launcher efficiency cannot exceed 100 %.');
-    if (siteAlt >= altKm * 1000) return clearOutputs('The launch site is already at or above the target altitude.');
+    if (dia > gap) return clearOutputs(`A ${sig(dia, 3)} m projectile does not fit a ${sig(gap, 3)} m bore. ` +
+      'Widen the rail spacing or slim the projectile.');
+
+    /* The bore is evacuated, so nothing resists inside the barrel and the air only
+       starts at the muzzle — which an inclined barrel raises above the breech. */
+    const muzzleAlt = siteAlt + len * Math.sin(angle * Math.PI / 180);
+    if (muzzleAlt >= altKm * 1000) return clearOutputs('The muzzle is already at or above the target altitude.');
+    els.emSiteHint.textContent = `Breech altitude. The bore is evacuated, so drag starts at the muzzle — ` +
+      `which this barrel puts at ${sig(muzzleAlt, 4)} m.`;
+
+    /* Inductance gradient for two parallel rails, from the parallel-conductor
+       result with the rail height as the characteristic dimension. A square bore
+       gives ≈0.53 µH/m, which is where real rail launchers sit. */
+    const lPrime = (MU0 / Math.PI) * Math.acosh(1 + gap / railH);
+    els.emGapHint.textContent = `Inductance gradient ${sig(lPrime * 1e6, 3)} µH/m — force is ½·L′·I².`;
 
     const area = Math.PI * Math.pow(dia / 2, 2);
     const cdAm = cd * area / payload;         // m²/kg — inverse ballistic coefficient
@@ -754,25 +792,35 @@ footer a:hover { color: var(--gold2); }
     const vCirc = Math.sqrt(GM / r);
     const vNeed = mode === 'orbit' ? vCirc : 0;
 
-    const sol = solveMuzzle(vNeed, angle, siteAlt, targetAlt, cdAm, vRot);
+    const sol = solveMuzzle(vNeed, angle, muzzleAlt, targetAlt, cdAm, vRot);
     if (!sol) {
       return clearOutputs('No muzzle velocity gets there. The projectile is too light for its frontal area — ' +
         'the air strips speed faster than the launcher can add it. Make it denser or narrower, raise the launch angle, or start higher up.');
     }
 
     const f = sol.flight;
-    const eMuzzle = 0.5 * payload * sol.v0 * sol.v0;          // ground-frame, what the launcher does
+    const eMuzzle = 0.5 * payload * sol.v0 * sol.v0;          // kinetic energy at the muzzle
+    const eClimb = payload * G0 * len * Math.sin(angle * Math.PI / 180);   // lifting it up the barrel
+    const eLauncher = eMuzzle + eClimb;                       // mechanical work the rails must do
     const vInert = Math.hypot(sol.v0 * Math.cos(angle * Math.PI / 180) + vRot, sol.v0 * Math.sin(angle * Math.PI / 180));
     const eRot = 0.5 * payload * (vInert * vInert - sol.v0 * sol.v0);
     const eDrag = f.dragLoss * payload;
     const ePot = payload * GM * (1 / (R_E + siteAlt) - 1 / r);
     const eFinal = 0.5 * payload * f.speed * f.speed;
-    const eElec = eMuzzle / (effPct / 100);
+    const eElec = eLauncher / (effPct / 100);
 
     // Speed is not enough on its own — the velocity has to be pointing the right way.
     const dvCirc = Math.hypot(f.vr, vCirc - f.vt);
     const barrelA = sol.v0 * sol.v0 / (2 * len);
     const dwell = 2 * len / sol.v0;
+
+    /* Constant acceleration down the barrel means constant force, so a constant
+       current follows from F = ½·L′·I². The rails carrying it repel each other
+       with µ₀I²/2πs per metre — the number that usually breaks the machine. */
+    const force = payload * barrelA + payload * G0 * Math.sin(angle * Math.PI / 180);
+    const current = Math.sqrt(2 * force / lPrime);
+    const railRepel = MU0 * current * current / (2 * Math.PI * gap);
+    const backEmf = lPrime * current * sol.v0;
 
     els.out.innerHTML = `${sci(eElec, 5)}<span class="unit">J</span>`;
     els.outAlt.textContent = `= ${eng(eElec / WH, 'Wh')}   (${sig(eElec / KWH, 4)} kWh)`;
@@ -789,11 +837,17 @@ footer a:hover { color: var(--gold2); }
       ['Peak deceleration', `${sig(f.maxG, 4)} g`],
       ['Peak dynamic pressure', `${sig(f.maxQ / 1e6, 3)} MPa at ${sig(f.maxQalt / 1000, 3)} km`],
       ['Barrel acceleration', `${sig(barrelA / G0, 4)} g over ${sig(dwell * 1000, 3)} ms`],
-      ['Average power in the barrel', eng(eElec / dwell, 'W')]
+      ['Average power in the barrel', eng(eElec / dwell, 'W')],
+      ['Inductance gradient', `${sig(lPrime * 1e6, 3)} µH/m`],
+      ['Rail current', eng(current, 'A')],
+      ['Rail repulsion', `${eng(railRepel, 'N')} per metre`],
+      ['Back-EMF at the muzzle', eng(backEmf, 'V')],
+      ['Muzzle altitude', `${sig(muzzleAlt, 4)} m`]
     ]);
 
     renderTable('Energy budget', 'Energy', [
       ['Delivered by the launcher (muzzle)', eng(eMuzzle, 'J')],
+      ['Lifting it up the barrel', `+${eng(eClimb, 'J')}`],
       ['Earth’s rotation', `+${eng(eRot, 'J')}`, 'credit'],
       ['Lost to atmospheric drag', `−${eng(eDrag, 'J')}`],
       ['Converted to altitude (potential)', `−${eng(ePot, 'J')}`],
@@ -838,12 +892,19 @@ footer a:hover { color: var(--gold2); }
   });
   // Typing an altitude or changing the mission means it is no longer a listed destination.
   [els.alt, els.mode].forEach(el => el.addEventListener('input', () => { els.dest.value = '0'; update(); }));
+  // The launcher inputs change the answer a lot, so surface them on the switch.
+  els.method.addEventListener('change', () => {
+    const em = els.method.value === 'em';
+    els.emAdv.open = em;
+    els.rocketAdv.open = !em;
+  });
+
   els.prop.addEventListener('change', () => {
     els.isp.value = String(PROPELLANTS[Number(els.prop.value)].isp);
     update();
   });
   ['mass','massUnit','lat','method','isp','stages','sigma','dia','diaMode','cd','twr',
-   'emDia','emCd','emAngle','emSite','emLen','emEff']
+   'emDia','emCd','emAngle','emSite','emLen','emEff','emGap','emRail']
     .forEach(id => els[id].addEventListener('input', update));
 
   update();
