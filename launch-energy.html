@@ -113,6 +113,8 @@ details.adv > .panel { margin-bottom: 0; padding-top: 4px; box-shadow: none; }
 .result .primary .unit { color: var(--muted); font-size: .55em; margin-left: .3em; }
 .result .secondary { margin-top: 6px; color: var(--green); font-size: 1.05rem; font-variant-numeric: tabular-nums; }
 .result .error { color: var(--red); font-size: 1rem; display: block; margin-top: 8px; }
+.result .note { color: var(--gold2); font-size: .88rem; display: block; margin-top: 10px;
+  text-align: left; padding: 10px 14px; border-left: 2px solid var(--gold3); }
 .result .caption { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
 
 .split { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--sh-light); }
@@ -187,6 +189,15 @@ footer a:hover { color: var(--gold2); }
     </div>
 
     <div class="field">
+      <label for="method">Launch method</label>
+      <select id="method">
+        <option value="rocket" selected>Rocket — thrusts continuously as it climbs</option>
+        <option value="em">Electromagnetic launcher — all energy delivered at the pad</option>
+      </select>
+      <p class="hint" id="methodHint">&nbsp;</p>
+    </div>
+
+    <div class="field">
       <label for="lat">Launch latitude — eastward launch takes a free ride from Earth’s spin</label>
       <div class="row">
         <input type="number" id="lat" value="28.5" min="0" max="90" step="any" inputmode="decimal"/>
@@ -196,7 +207,7 @@ footer a:hover { color: var(--gold2); }
     </div>
   </section>
 
-  <details class="adv nm-raised">
+  <details class="adv nm-raised" id="rocketAdv">
     <summary>Vehicle assumptions</summary>
     <div class="panel">
       <div class="grid2">
@@ -253,6 +264,61 @@ footer a:hover { color: var(--gold2); }
     </div>
   </details>
 
+  <details class="adv nm-raised" id="emAdv" style="display:none">
+    <summary>Launcher and projectile</summary>
+    <div class="panel">
+      <div class="grid2">
+        <div class="field">
+          <label for="emDia">Projectile diameter</label>
+          <div class="row">
+            <input type="number" id="emDia" value="0.5" min="0" step="any" inputmode="decimal"/>
+            <div class="unit-tag">m</div>
+          </div>
+          <p class="hint" id="emBcHint">&nbsp;</p>
+        </div>
+        <div class="field">
+          <label for="emCd">Drag coefficient <span class="sym">(C<sub>d</sub>, hypersonic)</span></label>
+          <input type="number" id="emCd" value="0.15" min="0" step="any" inputmode="decimal"/>
+          <p class="hint">A slender dense dart is 0.1–0.2; a blunt one is far worse.</p>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="emAngle">Launch angle above horizontal</label>
+          <div class="row">
+            <input type="number" id="emAngle" value="30" min="1" max="89" step="any" inputmode="decimal"/>
+            <div class="unit-tag">°</div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="emSite">Launch site altitude</label>
+          <div class="row">
+            <input type="number" id="emSite" value="0" min="0" step="any" inputmode="decimal"/>
+            <div class="unit-tag">m</div>
+          </div>
+          <p class="hint">Starting up a mountain skips the densest air.</p>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="emLen">Launcher length</label>
+          <div class="row">
+            <input type="number" id="emLen" value="1000" min="0" step="any" inputmode="decimal"/>
+            <div class="unit-tag">m</div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="emEff">Launcher efficiency</label>
+          <div class="row">
+            <input type="number" id="emEff" value="50" min="0.1" max="100" step="any" inputmode="decimal"/>
+            <div class="unit-tag">%</div>
+          </div>
+          <p class="hint">Rail and coil launchers convert 20–50 % of stored energy into muzzle energy.</p>
+        </div>
+      </div>
+    </div>
+  </details>
+
   <section class="panel result nm-raised">
     <div class="caption">Total energy required</div>
     <div class="primary" id="out">—</div>
@@ -260,23 +326,14 @@ footer a:hover { color: var(--gold2); }
     <div id="outErr"></div>
 
     <div class="split">
-      <div class="stats">
-        <div><span>Useful energy in payload</span><b id="sMech">—</b></div>
-        <div><span>Energy per kg of payload</span><b id="sPerKg">—</b></div>
-        <div><span>Overall efficiency</span><b id="sEff">—</b></div>
-        <div><span>Work against drag</span><b id="sDrag">—</b></div>
-        <div><span>Propellant mass</span><b id="sProp">—</b></div>
-        <div><span>Liftoff mass</span><b id="sGlom">—</b></div>
-        <div><span>Max dynamic pressure</span><b id="sMaxQ">—</b></div>
-        <div><span>Payload fraction</span><b id="sFrac">—</b></div>
-      </div>
+      <div class="stats" id="stats"></div>
     </div>
 
     <div class="split">
-      <div class="caption" style="text-align:left">Δv budget</div>
+      <div class="caption" style="text-align:left" id="tableCaption">Δv budget</div>
       <div class="scroll-x">
         <table class="budget">
-          <thead><tr><th>Contribution</th><th>Δv</th></tr></thead>
+          <thead><tr><th>Contribution</th><th id="tableCol">Δv</th></tr></thead>
           <tbody id="budget"></tbody>
         </table>
       </div>
@@ -289,6 +346,10 @@ footer a:hover { color: var(--gold2); }
        the vehicle is moving at each altitude — not a fixed allowance.</p>
     <p>A preliminary-design estimate. Real vehicles differ with staging, throttling,
        trajectory shaping and engine performance that varies with altitude.</p>
+    <p>A gun launch has to survive things this model does not compute: stagnation
+       pressure and aeroheating at hypersonic speed in dense air, and the barrel
+       acceleration shown. Drag here is the energy cost alone, not a survivability
+       verdict.</p>
     <p><a href="index.html">← Netherlayer</a> · <a href="capacitor.html">Capacitance calculator</a></p>
   </footer>
 
@@ -354,9 +415,10 @@ footer a:hover { color: var(--gold2); }
 
   const $ = id => document.getElementById(id);
   const els = {};
-  ['mass','massUnit','dest','alt','mode','lat','latHint','isp','prop','stages','sigma',
-   'dia','diaMode','diaHint','cd','twr','out','outAlt','outErr','sMech','sPerKg','sEff','sDrag','sProp',
-   'sGlom','sMaxQ','sFrac','budget'].forEach(id => { els[id] = $(id); });
+  ['mass','massUnit','dest','alt','mode','lat','latHint','method','methodHint','isp','prop',
+   'stages','sigma','dia','diaMode','diaHint','cd','twr','rocketAdv','emAdv','emDia','emCd',
+   'emAngle','emSite','emLen','emEff','emBcHint','out','outAlt','outErr','stats','tableCaption',
+   'tableCol','budget'].forEach(id => { els[id] = $(id); });
 
   /* Chemical energy per kg of propellant mixture, with the specific impulse that
      propellant realistically delivers. The two travel together — comparing energy
@@ -514,14 +576,22 @@ footer a:hover { color: var(--gold2); }
     els.out.textContent = '—';
     els.outAlt.innerHTML = '&nbsp;';
     els.outErr.innerHTML = msg ? `<span class="error">${msg}</span>` : '';
-    ['sMech','sPerKg','sEff','sDrag','sProp','sGlom','sMaxQ','sFrac'].forEach(k => { els[k].textContent = '—'; });
+    els.stats.innerHTML = '';
     els.budget.innerHTML = '';
   }
 
-  function update() {
-    const payload = readPositive(els.mass) * parseFloat(els.massUnit.value);
-    const altKm = readPositive(els.alt, true);
-    const lat = readPositive(els.lat, true);
+  const renderStats = pairs => {
+    els.stats.innerHTML = pairs.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+  };
+  const renderTable = (caption, col, rows) => {
+    els.tableCaption.textContent = caption;
+    els.tableCol.textContent = col;
+    els.budget.innerHTML = rows.map(([label, val, cls]) =>
+      `<tr class="${cls || ''}"><td>${label}</td><td>${val}</td></tr>`).join('');
+  };
+
+  /* ─── Rocket ─── */
+  function runRocket(payload, r, mode, vRot, altKm) {
     const isp = readPositive(els.isp);
     const sigma = readPositive(els.sigma);
     const autoDia = els.diaMode.value === 'auto';
@@ -530,24 +600,14 @@ footer a:hover { color: var(--gold2); }
     const cd = readPositive(els.cd);
     const twr = readPositive(els.twr);
     const stages = Number(els.stages.value);
-    const mode = els.mode.value;
     const propMJ = PROPELLANTS[Number(els.prop.value)].mj;
 
-    const vRot = OMEGA * R_E * Math.cos(lat * Math.PI / 180);
-    els.latHint.textContent = isFinite(lat)
-      ? `Earth’s surface is moving ${sig(vRot, 4)} m/s eastward here — that much Δv comes free.`
-      : ' ';
-
-    const required = [payload, altKm, lat, isp, sigma, cd, twr];
+    const required = [isp, sigma, cd, twr];
     if (!autoDia) required.push(manualDia);
-    if (required.some(x => !isFinite(x))) {
-      return clearOutputs('Fill in every field with a positive number.');
-    }
-    if (altKm <= 0) return clearOutputs('Altitude must be above the ground.');
+    if (required.some(x => !isFinite(x))) return clearOutputs('Fill in every vehicle field with a positive number.');
     if (sigma <= 0 || sigma >= 1) return clearOutputs('Structural coefficient must be between 0 and 1.');
     if (twr <= 1) return clearOutputs('Thrust-to-weight must exceed 1 or the vehicle will not lift off.');
 
-    const r = R_E + altKm * 1000;
     const dvIdeal = idealDv(r, mode);
     const eSpec = specificEnergy(r, mode);
     const eMech = eSpec * payload;
@@ -557,16 +617,13 @@ footer a:hover { color: var(--gold2); }
     let sized = null, flight = null, dvTotal = dvIdeal, dvDrag = 0, dvGrav = 0, dia = manualDia;
     const dvSteer = 0.02 * dvIdeal;   // steering/attitude losses, ~2%
     for (let i = 0; i < 12; i++) {
-      dvTotal = dvIdeal + dvDrag + dvGrav + dvSteer - vRot;
-      if (dvTotal < 0) dvTotal = 0;
+      dvTotal = Math.max(0, dvIdeal + dvDrag + dvGrav + dvSteer - vRot);
       sized = sizeVehicle(payload, dvTotal, isp, stages, sigma);
       if (!sized) break;
       if (autoDia) dia = vehicleDiameter(sized.glom);
-      const area = Math.PI * Math.pow(dia / 2, 2);
-      flight = ascent(sized.glom, isp, twr, cd, area);
-      const nextDrag = flight.dragDv, nextGrav = flight.gravDv;
-      const settled = Math.abs(nextDrag - dvDrag) < 1 && Math.abs(nextGrav - dvGrav) < 1;
-      dvDrag = nextDrag; dvGrav = nextGrav;
+      flight = ascent(sized.glom, isp, twr, cd, Math.PI * Math.pow(dia / 2, 2));
+      const settled = Math.abs(flight.dragDv - dvDrag) < 1 && Math.abs(flight.gravDv - dvGrav) < 1;
+      dvDrag = flight.dragDv; dvGrav = flight.gravDv;
       if (settled) break;
     }
 
@@ -585,26 +642,192 @@ footer a:hover { color: var(--gold2); }
     els.outAlt.textContent = `= ${eng(eChem / WH, 'Wh')}   (${sig(eChem / KWH, 4)} kWh)`;
     els.outErr.innerHTML = '';
 
-    els.sMech.textContent = `${eng(eMech, 'J')} / ${eng(eMech / WH, 'Wh')}`;
-    els.sPerKg.textContent = `${sig(eSpec / 1e6, 4)} MJ/kg  (${sig(eSpec / KWH, 3)} kWh/kg)`;
-    els.sEff.textContent = `${sig(100 * eMech / eChem, 3)} %`;
-    els.sDrag.textContent = `${eng(flight.dragWork, 'J')} / ${eng(flight.dragWork / WH, 'Wh')}`;
-    els.sProp.textContent = mass(sized.propellant);
-    els.sGlom.textContent = mass(sized.glom);
-    els.sMaxQ.textContent = `${sig(flight.maxQ / 1000, 3)} kPa at ${sig(flight.maxQalt / 1000, 3)} km`;
-    els.sFrac.textContent = `${sig(100 * payload / sized.glom, 3)} %`;
+    renderStats([
+      ['Useful energy in payload', `${eng(eMech, 'J')} / ${eng(eMech / WH, 'Wh')}`],
+      ['Energy per kg of payload', `${sig(eSpec / 1e6, 4)} MJ/kg  (${sig(eSpec / KWH, 3)} kWh/kg)`],
+      ['Overall efficiency', `${sig(100 * eMech / eChem, 3)} %`],
+      ['Work against drag', `${eng(flight.dragWork, 'J')} / ${eng(flight.dragWork / WH, 'Wh')}`],
+      ['Propellant mass', mass(sized.propellant)],
+      ['Liftoff mass', mass(sized.glom)],
+      ['Max dynamic pressure', `${sig(flight.maxQ / 1000, 3)} kPa at ${sig(flight.maxQalt / 1000, 3)} km`],
+      ['Payload fraction', `${sig(100 * payload / sized.glom, 3)} %`]
+    ]);
 
-    const rows = [
-      ['Ideal (energy to reach the target)', dvIdeal, ''],
-      ['Gravity loss (climbing while thrusting)', dvGrav, ''],
-      ['Drag loss (pushing through the air)', dvDrag, ''],
-      ['Steering and attitude losses', dvSteer, ''],
-      ['Earth’s rotation', -vRot, 'credit'],
-      ['Total required', dvTotal, 'total']
-    ];
-    els.budget.innerHTML = rows.map(([label, val, cls]) =>
-      `<tr class="${cls}"><td>${label}</td><td>${val < 0 ? '−' : ''}${sig(Math.abs(val), 4)} m/s</td></tr>`
-    ).join('');
+    renderTable('Δv budget', 'Δv', [
+      ['Ideal (energy to reach the target)', `${sig(dvIdeal, 4)} m/s`],
+      ['Gravity loss (climbing while thrusting)', `${sig(dvGrav, 4)} m/s`],
+      ['Drag loss (pushing through the air)', `${sig(dvDrag, 4)} m/s`],
+      ['Steering and attitude losses', `${sig(dvSteer, 4)} m/s`],
+      ['Earth’s rotation', `−${sig(vRot, 4)} m/s`, 'credit'],
+      ['Total required', `${sig(dvTotal, 4)} m/s`, 'total']
+    ]);
+  }
+
+  /* ─── Electromagnetic launcher ─── */
+  /* One impulse at the pad, then an unpowered coast. Integrated in the inertial
+     frame in Cartesian coordinates so Earth's curvature is handled properly — at
+     8 km/s the ground falls away fast enough to change the answer. Drag scales
+     with v², and a gun launch starts at full speed in the densest air, so the
+     projectile's ballistic coefficient dominates everything. */
+  function ballistic(v0, angleDeg, siteAlt, targetAlt, cdAm, vRot) {
+    const th = angleDeg * Math.PI / 180;
+    let x = 0, y = R_E + siteAlt;
+    let vx = v0 * Math.cos(th) + vRot;   // eastward launch rides the rotation
+    let vy = v0 * Math.sin(th);
+    let t = 0, dragLoss = 0, maxG = 0, maxQ = 0, maxQalt = 0, apogee = siteAlt;
+
+    while (t < 20000) {
+      const r = Math.hypot(x, y);
+      const alt = r - R_E;
+      const v = Math.hypot(vx, vy);
+      if (alt > apogee) apogee = alt;
+
+      if (alt >= targetAlt) {
+        const vr = (x * vx + y * vy) / r;              // radial (climbing)
+        const vt = Math.abs(x * vy - y * vx) / r;      // tangential (orbital)
+        return { reached: true, speed: v, vr, vt, dragLoss, maxG, maxQ, maxQalt, t, apogee };
+      }
+      const vrad = (x * vx + y * vy) / r;
+      if (vrad < 0 || alt < siteAlt - 1000) return { reached: false, apogee, dragLoss, maxG, maxQ, maxQalt };
+
+      const rho = density(alt);
+      const q = 0.5 * rho * v * v;
+      const aDrag = q * cdAm;
+      if (q > maxQ) { maxQ = q; maxQalt = alt; }
+      if (aDrag / G0 > maxG) maxG = aDrag / G0;
+
+      const g3 = GM / (r * r * r);
+      const ax = -g3 * x - aDrag * vx / v;
+      const ay = -g3 * y - aDrag * vy / v;
+
+      const atot = Math.hypot(ax, ay);
+      let dt = Math.min(alt > 150000 ? 2 : 0.25, 100 / Math.max(v, 1));
+      if (atot > 0) dt = Math.min(dt, 0.01 * v / atot);
+      dt = Math.max(dt, 1e-4);
+
+      dragLoss += aDrag * v * dt;   // J/kg
+      vx += ax * dt; vy += ay * dt; x += vx * dt; y += vy * dt; t += dt;
+    }
+    return { reached: false, apogee, dragLoss, maxG, maxQ, maxQalt };
+  }
+
+  /* Bisect for the muzzle speed that arrives at the target with the speed it needs.
+     Undershooting reads negative whether it fell short on altitude or on speed, so
+     the sign alone is enough to bracket. */
+  function solveMuzzle(vNeed, angle, siteAlt, targetAlt, cdAm, vRot) {
+    const f = v0 => {
+      const s = ballistic(v0, angle, siteAlt, targetAlt, cdAm, vRot);
+      return s.reached ? { val: s.speed - vNeed, s } : { val: -vNeed - 1 - (targetAlt - s.apogee) / 1000, s };
+    };
+    let lo = 100, hi = 60000;
+    if (f(hi).val < 0) return null;
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2;
+      if (f(mid).val < 0) lo = mid; else hi = mid;
+      if (hi - lo < 0.5) break;
+    }
+    const out = f(hi);
+    return { v0: hi, flight: out.s };
+  }
+
+  function runEM(payload, r, mode, vRot, altKm) {
+    const dia = readPositive(els.emDia);
+    const cd = readPositive(els.emCd);
+    const angle = readPositive(els.emAngle);
+    const siteAlt = readPositive(els.emSite, true);
+    const len = readPositive(els.emLen);
+    const effPct = readPositive(els.emEff);
+
+    if ([dia, cd, angle, siteAlt, len, effPct].some(x => !isFinite(x))) {
+      return clearOutputs('Fill in every launcher field with a positive number.');
+    }
+    if (angle >= 90 || angle <= 0) return clearOutputs('Launch angle must be between 0 and 90 degrees.');
+    if (effPct > 100) return clearOutputs('Launcher efficiency cannot exceed 100 %.');
+    if (siteAlt >= altKm * 1000) return clearOutputs('The launch site is already at or above the target altitude.');
+
+    const area = Math.PI * Math.pow(dia / 2, 2);
+    const cdAm = cd * area / payload;         // m²/kg — inverse ballistic coefficient
+    els.emBcHint.textContent =
+      `${sig(area, 3)} m² frontal area — ballistic coefficient ${sig(payload / (cd * area), 4)} kg/m².`;
+
+    const targetAlt = altKm * 1000;
+    const vCirc = Math.sqrt(GM / r);
+    const vNeed = mode === 'orbit' ? vCirc : 0;
+
+    const sol = solveMuzzle(vNeed, angle, siteAlt, targetAlt, cdAm, vRot);
+    if (!sol) {
+      return clearOutputs('No muzzle velocity gets there. The projectile is too light for its frontal area — ' +
+        'the air strips speed faster than the launcher can add it. Make it denser or narrower, raise the launch angle, or start higher up.');
+    }
+
+    const f = sol.flight;
+    const eMuzzle = 0.5 * payload * sol.v0 * sol.v0;          // ground-frame, what the launcher does
+    const vInert = Math.hypot(sol.v0 * Math.cos(angle * Math.PI / 180) + vRot, sol.v0 * Math.sin(angle * Math.PI / 180));
+    const eRot = 0.5 * payload * (vInert * vInert - sol.v0 * sol.v0);
+    const eDrag = f.dragLoss * payload;
+    const ePot = payload * GM * (1 / (R_E + siteAlt) - 1 / r);
+    const eFinal = 0.5 * payload * f.speed * f.speed;
+    const eElec = eMuzzle / (effPct / 100);
+
+    // Speed is not enough on its own — the velocity has to be pointing the right way.
+    const dvCirc = Math.hypot(f.vr, vCirc - f.vt);
+    const barrelA = sol.v0 * sol.v0 / (2 * len);
+    const dwell = 2 * len / sol.v0;
+
+    els.out.innerHTML = `${sci(eElec, 5)}<span class="unit">J</span>`;
+    els.outAlt.textContent = `= ${eng(eElec / WH, 'Wh')}   (${sig(eElec / KWH, 4)} kWh)`;
+    els.outErr.innerHTML = mode === 'orbit'
+      ? `<span class="note">Arrives at ${sig(f.speed, 4)} m/s, but ${sig(f.vr, 4)} m/s of that is still climbing — ` +
+        `a ballistic shot cannot close its own orbit. A kick stage must supply ${sig(dvCirc, 4)} m/s at altitude.</span>`
+      : '';
+
+    renderStats([
+      ['Required muzzle velocity', `${sig(sol.v0 / 1000, 4)} km/s`],
+      ['Muzzle energy', `${eng(eMuzzle, 'J')} / ${eng(eMuzzle / WH, 'Wh')}`],
+      ['Energy per kg of payload', `${sig(eElec / payload / 1e6, 4)} MJ/kg  (${sig(eElec / payload / KWH, 3)} kWh/kg)`],
+      ['Lost to drag', `${eng(eDrag, 'J')}  (${sig(100 * eDrag / (eMuzzle + eRot), 3)} %)`],
+      ['Peak deceleration', `${sig(f.maxG, 4)} g`],
+      ['Peak dynamic pressure', `${sig(f.maxQ / 1e6, 3)} MPa at ${sig(f.maxQalt / 1000, 3)} km`],
+      ['Barrel acceleration', `${sig(barrelA / G0, 4)} g over ${sig(dwell * 1000, 3)} ms`],
+      ['Average power in the barrel', eng(eElec / dwell, 'W')]
+    ]);
+
+    renderTable('Energy budget', 'Energy', [
+      ['Delivered by the launcher (muzzle)', eng(eMuzzle, 'J')],
+      ['Earth’s rotation', `+${eng(eRot, 'J')}`, 'credit'],
+      ['Lost to atmospheric drag', `−${eng(eDrag, 'J')}`],
+      ['Converted to altitude (potential)', `−${eng(ePot, 'J')}`],
+      ['Left as kinetic energy on arrival', eng(eFinal, 'J'), 'total']
+    ]);
+  }
+
+  /* ─── Main ─── */
+  function update() {
+    const method = els.method.value;
+    els.rocketAdv.style.display = method === 'rocket' ? '' : 'none';
+    els.emAdv.style.display = method === 'em' ? '' : 'none';
+    els.methodHint.textContent = method === 'em'
+      ? 'All the energy goes in at the pad, so the projectile meets the thickest air at its highest speed.'
+      : 'Thrust is spread over the climb, so the vehicle is slow while the air is thick.';
+
+    const payload = readPositive(els.mass) * parseFloat(els.massUnit.value);
+    const altKm = readPositive(els.alt, true);
+    const lat = readPositive(els.lat, true);
+    const mode = els.mode.value;
+
+    const vRot = OMEGA * R_E * Math.cos(lat * Math.PI / 180);
+    els.latHint.textContent = isFinite(lat)
+      ? `Earth’s surface is moving ${sig(vRot, 4)} m/s eastward here — that much comes free.`
+      : ' ';
+
+    if ([payload, altKm, lat].some(x => !isFinite(x))) {
+      return clearOutputs('Fill in every field with a positive number.');
+    }
+    if (altKm <= 0) return clearOutputs('Altitude must be above the ground.');
+
+    const r = R_E + altKm * 1000;
+    if (method === 'em') runEM(payload, r, mode, vRot, altKm);
+    else runRocket(payload, r, mode, vRot, altKm);
   }
 
   /* ─── Wiring ─── */
@@ -619,7 +842,8 @@ footer a:hover { color: var(--gold2); }
     els.isp.value = String(PROPELLANTS[Number(els.prop.value)].isp);
     update();
   });
-  ['mass','massUnit','lat','isp','stages','sigma','dia','diaMode','cd','twr']
+  ['mass','massUnit','lat','method','isp','stages','sigma','dia','diaMode','cd','twr',
+   'emDia','emCd','emAngle','emSite','emLen','emEff']
     .forEach(id => els[id].addEventListener('input', update));
 
   update();
