@@ -108,7 +108,7 @@ input[type=number] { -moz-appearance: textfield; }
 
 /* ─── Chart ─── */
 .chart-wrap { position: relative; margin-top: 10px; }
-svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg.chart { width: 100%; height: auto; aspect-ratio: 760 / 400; display: block; overflow: visible; }
 svg.chart .grid-line { stroke: var(--grid); stroke-width: 1; }
 svg.chart .axis-line { stroke: var(--sh-light); stroke-width: 1; }
 svg.chart .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -185,9 +185,26 @@ footer a:hover { color: var(--gold2); }
           <input type="number" id="imax" value="2000" min="0" step="any" inputmode="decimal"/>
           <select id="iUnit">
             <option value="1" selected>A</option>
+            <option value="1000">kA</option>
             <option value="0.001">mA</option>
           </select>
         </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="sysV">System voltage</label>
+        <div class="row">
+          <input type="number" id="sysV" value="1" min="0" step="any" inputmode="decimal"/>
+          <select id="vUnit">
+            <option value="1">V</option>
+            <option value="1000">kV</option>
+            <option value="1000000" selected>MV</option>
+          </select>
+        </div>
+        <p class="hint">Sets what the drop is measured against — how much of the line
+           voltage the run eats, and how much power survives it.</p>
       </div>
     </div>
   </section>
@@ -273,6 +290,17 @@ footer a:hover { color: var(--gold2); }
     </div>
 
     <div class="field">
+      <label for="sigma">Arc plasma conductivity</label>
+      <div class="row">
+        <input type="number" id="sigma" value="6000" min="1" step="any" inputmode="decimal"/>
+        <div class="unit-tag">S/m</div>
+      </div>
+      <p class="hint">Once the tube arcs, the column is a thermal plasma and this is what
+         carries the current. Roughly 6000 S/m for argon near 15 000 K — about a ten-thousandth
+         of copper. Put your own figure in if you have one.</p>
+    </div>
+
+    <div class="field">
       <label>Fill pressures for the five curves</label>
       <div class="grid5">
         <input type="number" id="p1" value="0.1" min="0" step="any" inputmode="decimal"/>
@@ -327,6 +355,7 @@ footer a:hover { color: var(--gold2); }
   const ANODE_FALL = 15;          // V, typical
   const PACKING = 0.75;           // strand packing fraction in a round bundle
   const ARC_RATIO = 100;          // j/j_n beyond which a glow goes over to an arc
+  const MIN_ARC = 0.1;            // A — below this the cathode cannot go thermionic
 
   /* ρ at 20 °C (Ω·m), temperature coefficient (1/K), density (kg/m³) */
   const MATERIALS = [
@@ -365,11 +394,14 @@ footer a:hover { color: var(--gold2); }
 
   const $ = id => document.getElementById(id);
   const els = {};
-  ['kind','kindHint','len','lenUnit','imax','iUnit','cablePanel','tubePanel','mat','matHint',
+  ['kind','kindHint','len','lenUnit','imax','iUnit','sysV','vUnit','cablePanel','tubePanel','mat','matHint',
    'temp','build','solidRow','strandRow','dia','nStrand','dStrand','strandHint','gas','gasHint',
-   'bore','cath','cathHint','p1','p2','p3','p4','p5','statsCaption','stats','err','modelNote',
+   'bore','cath','cathHint','sigma','p1','p2','p3','p4','p5','statsCaption','stats','err','modelNote',
    'chartCaption','chart','tip','legend','tableCaption','thead','table','footNote']
-    .forEach(id => { els[id] = $(id); });
+    .forEach(id => {
+      els[id] = $(id);
+      if (!els[id]) throw new Error(`markup is missing #${id}`);
+    });
 
   MATERIALS.forEach((m, i) => els.mat.add(new Option(m.name, String(i))));
   GASES.forEach((g, i) => els.gas.add(new Option(g.name, String(i))));
@@ -394,7 +426,11 @@ footer a:hover { color: var(--gold2); }
     if (e >= -3 && e <= 4) return sig(x, n);
     return `${(x / Math.pow(10, e)).toPrecision(n)} × 10${String(e).split('').map(c => SUP[c]).join('')}`;
   };
-  const amps = a => a >= 1 ? `${sig(a, 3)} A` : a >= 1e-3 ? `${sig(a * 1e3, 3)} mA` : `${sig(a * 1e6, 3)} µA`;
+  const amps = a => a >= 1e6 ? `${sig(a / 1e6, 3)} MA` : a >= 1e3 ? `${sig(a / 1e3, 3)} kA`
+    : a >= 1 ? `${sig(a, 3)} A` : a >= 1e-3 ? `${sig(a * 1e3, 3)} mA` : `${sig(a * 1e6, 3)} µA`;
+  const volts = v => v >= 1e6 ? `${sig(v / 1e6, 4)} MV` : v >= 1e3 ? `${sig(v / 1e3, 4)} kV` : `${sig(v, 4)} V`;
+  const watts = w => w >= 1e9 ? `${sig(w / 1e9, 4)} GW` : w >= 1e6 ? `${sig(w / 1e6, 4)} MW`
+    : w >= 1e3 ? `${sig(w / 1e3, 4)} kW` : `${sig(w, 4)} W`;
 
   /* ─── Metal cable ───────────────────────────────────────────────────────
      Ohm's law with a temperature-corrected resistivity. Nothing else — the
@@ -419,6 +455,16 @@ footer a:hover { color: var(--gold2); }
     return pPa * epRef * Math.pow(pr / prRef, -0.5);
   }
 
+  /* Past the glow the column is a thermal plasma and simply obeys Ohm's law with a
+     plasma conductivity: E = j/σ. Electrode falls collapse to a few tens of volts.
+     Pressure barely matters here — that is the real difference between the two
+     regimes, and why all the arc branches land on top of each other. */
+  const ARC_ELECTRODES = 25;      // V, cathode + anode fall in an arc
+  function arcVoltage(I, sigma, rBore, len) {
+    const area = Math.PI * rBore * rBore;
+    return { V: (I / (sigma * area)) * len + ARC_ELECTRODES, E: I / (sigma * area) };
+  }
+
   function tubeVoltage(I, gas, pPa, rBore, len, cathArea) {
     const jn = gas.jn * 5.626e-7 * pPa * pPa;       // A/m², from µA/(cm²·Torr²)
     const In = jn * cathArea;                       // current that fills the cathode
@@ -441,19 +487,29 @@ footer a:hover { color: var(--gold2); }
 
   let chartState = null;
 
-  function drawChart(series, iMax, vMin, vMax, xLabel, logX, iMin) {
+  function drawChart(series, iMax, vMin, vMax, xLabel, logX, iMin, logY) {
     const lg = Math.log10;
     const x = logX
       ? i => M.l + (lg(Math.max(i, iMin) / iMin) / lg(iMax / iMin)) * PW
       : i => M.l + (i / iMax) * PW;
-    const y = v => M.t + PH - ((v - vMin) / (vMax - vMin)) * PH;
+    const y = logY
+      ? v => M.t + PH - (lg(Math.max(v, vMin) / vMin) / lg(vMax / vMin)) * PH
+      : v => M.t + PH - ((v - vMin) / (vMax - vMin)) * PH;
     const parts = [];
     const yTicks = 5, xTicks = 5;
 
-    for (let i = 0; i <= yTicks; i++) {
-      const v = vMin + (vMax - vMin) * i / yTicks, py = y(v);
-      parts.push(`<line class="grid-line" x1="${M.l}" y1="${py}" x2="${M.l + PW}" y2="${py}"/>`);
-      parts.push(`<text class="tick" x="${M.l - 10}" y="${py + 4}" text-anchor="end">${sig(v, 3)}</text>`);
+    if (logY) {
+      for (let e = Math.ceil(lg(vMin)); e <= Math.floor(lg(vMax)); e++) {
+        const v = Math.pow(10, e), py = y(v);
+        parts.push(`<line class="grid-line" x1="${M.l}" y1="${py}" x2="${M.l + PW}" y2="${py}"/>`);
+        parts.push(`<text class="tick" x="${M.l - 10}" y="${py + 4}" text-anchor="end">${volts(v)}</text>`);
+      }
+    } else {
+      for (let i = 0; i <= yTicks; i++) {
+        const v = vMin + (vMax - vMin) * i / yTicks, py = y(v);
+        parts.push(`<line class="grid-line" x1="${M.l}" y1="${py}" x2="${M.l + PW}" y2="${py}"/>`);
+        parts.push(`<text class="tick" x="${M.l - 10}" y="${py + 4}" text-anchor="end">${sig(v, 3)}</text>`);
+      }
     }
     if (logX) {
       // One gridline per decade, labelled in whatever unit keeps the number readable.
@@ -475,9 +531,20 @@ footer a:hover { color: var(--gold2); }
     parts.push(`<text class="axis-title" transform="translate(18 ${M.t + PH / 2}) rotate(-90)" text-anchor="middle">Voltage drop (V)</text>`);
 
     series.forEach(s => {
-      const drawn = s.pts.filter(p => p.valid !== false);
-      const pts = drawn.map(p => `${x(p.i).toFixed(2)},${y(p.v).toFixed(2)}`).join(' ');
-      parts.push(`<polyline class="series" points="${pts}" stroke="${s.color}"/>`);
+      // Glow and arc are separate branches with a real voltage collapse between
+      // them, so draw each run of same-regime points as its own polyline.
+      let run = [], regime = null;
+      const flush = () => {
+        if (run.length > 1) parts.push(
+          `<polyline class="series" points="${run.join(' ')}" stroke="${s.color}"/>`);
+        run = [];
+      };
+      s.pts.forEach(p => {
+        if (p.valid === false) { flush(); regime = null; return; }
+        if (p.regime !== regime) { flush(); regime = p.regime; }
+        run.push(`${x(p.i).toFixed(2)},${y(p.v).toFixed(2)}`);
+      });
+      flush();
       // Selective direct marking: only the knee where normal glow becomes abnormal.
       if (s.knee && s.knee.i <= iMax) parts.push(
         `<circle class="knee" cx="${x(s.knee.i)}" cy="${y(s.knee.v)}" r="4.5" stroke="${s.color}"/>`);
@@ -519,7 +586,7 @@ footer a:hover { color: var(--gold2); }
 
       els.tip.innerHTML = `<h4>${amps(cur)}</h4>` + series.map(s => {
         const pt = s.pts[idx];
-        const val = pt.valid === false ? 'arc' : `${sig(pt.v, 3)} V`;
+        const val = pt.valid === false ? 'unstable' : `${sig(pt.v, 3)} V`;
         return `<div><i style="background:${s.color}"></i>${s.label}<em>${val}</em></div>`;
       }).join('');
       const boxW = els.tip.offsetWidth || 170;
@@ -564,13 +631,15 @@ footer a:hover { color: var(--gold2); }
 
     const len = readPositive(els.len) * parseFloat(els.lenUnit.value);
     const iMax = readPositive(els.imax) * parseFloat(els.iUnit.value);
+    const sysV = readPositive(els.sysV) * parseFloat(els.vUnit.value);
     if (!isFinite(len) || !isFinite(iMax)) return fail('Give a run length and a current axis maximum.');
+    if (!isFinite(sysV)) return fail('Give a system voltage.');
     els.err.innerHTML = '';
 
-    return tube ? runTube(len, iMax) : runCable(len, iMax);
+    return tube ? runTube(len, iMax, sysV) : runCable(len, iMax, sysV);
   }
 
-  function runCable(len, iMax) {
+  function runCable(len, iMax, sysV) {
     const mat = MATERIALS[Number(els.mat.value)];
     const T = parseFloat(els.temp.value);
     const stranded = els.build.value === 'stranded';
@@ -604,8 +673,12 @@ footer a:hover { color: var(--gold2); }
       ['Resistance per km', `${sci(R * 1000 / len, 4)} Ω/km`],
       ['Outer diameter', `${sig(d1 * 1000, 4)} mm`],
       ['Conductor mass', `${sig(area * len * mat.den, 4)} kg`],
-      ['Drop at full scale', `${sig(iMax * R, 4)} V`],
-      ['Loss at full scale', `${sci(iMax * iMax * R, 4)} W`]
+      ['Current density at full scale', `${sig(iMax / (area * 1e6), 4)} A/mm²`],
+      ['Drop at full scale', volts(iMax * R)],
+      ['Drop as % of system voltage', `${sig(100 * iMax * R / sysV, 3)} %`],
+      ['Power delivered', watts(iMax * (sysV - iMax * R))],
+      ['Power lost in the run', watts(iMax * iMax * R)],
+      ['Transmission efficiency', `${sig(100 * (1 - iMax * R / sysV), 4)} %`]
     ];
     if (Math.abs(T - 20) > 0.01) stats.splice(2, 0, ['Resistance at 20 °C', `${sci(resistance(20, geom, mat), 4)} Ω`]);
     if (strand) {
@@ -616,7 +689,22 @@ footer a:hover { color: var(--gold2); }
     }
     els.statsCaption.textContent = 'Metal cable';
     renderStats(stats);
-    els.modelNote.innerHTML = '';
+
+    /* Continuously rated copper sits near 2–5 A/mm². Well past that the cable is a
+       fuse, and past the drop exceeding the supply it is not a transmission line
+       at all — both are worth saying rather than quietly returning a number. */
+    const jmm = iMax / (area * 1e6);
+    const notes = [];
+    if (iMax * R >= sysV) notes.push(
+      `The drop at full scale (${volts(iMax * R)}) meets or exceeds the ${volts(sysV)} supply — ` +
+      'no current like that flows. Raise the voltage, shorten the run, or thicken the conductor.');
+    else if (iMax * R > 0.1 * sysV) notes.push(
+      `The run eats ${sig(100 * iMax * R / sysV, 3)} % of the supply at full scale.`);
+    if (jmm > 5) notes.push(
+      `${sig(jmm, 3)} A/mm² is ${sig(jmm / 4, 2)}× what continuously rated copper carries — ` +
+      'sustained, this conductor is a fuse. Short pulses are a different question, which this ' +
+      'steady-state model does not answer.');
+    els.modelNote.innerHTML = notes.length ? `<span class="note">${notes.join('<br><br>')}</span>` : '';
 
     const N = 60, pts = [];
     for (let j = 0; j <= N; j++) { const I = iMax * j / N; pts.push({ i: I, v: I * R }); }
@@ -631,19 +719,21 @@ footer a:hover { color: var(--gold2); }
     els.thead.innerHTML = '<tr><th>Current</th><th>Voltage drop</th><th>Power lost</th><th>Drop per km</th></tr>';
     els.table.innerHTML = [0.25, 0.5, 0.75, 1].map(f => {
       const I = iMax * f;
-      return `<tr><td>${amps(I)}</td><td>${sig(I * R, 4)} V</td>` +
-        `<td>${sci(I * I * R, 4)} W</td><td>${sig(I * R * 1000 / len, 4)} V/km</td></tr>`;
+      return `<tr><td>${amps(I)}</td><td>${volts(I * R)}</td>` +
+        `<td>${watts(I * I * R)}</td><td>${volts(I * R * 1000 / len)}/km</td></tr>`;
     }).join('');
 
     els.footNote.textContent = 'A metal cable obeys Ohm’s law: resistance is set by material, ' +
       'geometry and temperature, and the drop is simply I × R. Resistance here is DC — no skin or proximity effect.';
   }
 
-  function runTube(len, iMax) {
+  function runTube(len, iMax, sysV) {
     const gas = GASES[Number(els.gas.value)];
     const bore = readPositive(els.bore) / 1000;
     const cathArea = readPositive(els.cath) / 1e4;   // cm² → m²
+    const sigma = readPositive(els.sigma);
     const pressures = ['p1','p2','p3','p4','p5'].map(id => readPositive(els[id]) * TORR);
+    if (!isFinite(sigma)) return fail('Give a plasma conductivity for the arc regime.');
     if (!isFinite(bore) || !isFinite(cathArea)) return fail('Give a bore diameter and a cathode area.');
     if (pressures.some(x => !isFinite(x))) return fail('All five pressures must be positive.');
 
@@ -660,57 +750,81 @@ footer a:hover { color: var(--gold2); }
       ['Normal cathode fall', `${gas.Vn} V`],
       ['Anode fall (assumed)', `${ANODE_FALL} V`],
       ['Column gradient at ' + sig(mid / TORR, 3) + ' Torr', `${sig(columnField(gas, mid, r), 4)} V/m`],
-      ['Column voltage there', `${sig(columnField(gas, mid, r) * len, 4)} V`],
-      ['Bore', `${sig(bore * 1000, 3)} mm`]
+      ['Column voltage there', `${volts(columnField(gas, mid, r) * len)}`],
+      ['Bore', `${sig(bore * 1000, 3)} mm`],
+      ['Current density at full scale', `${sci(iMax / (Math.PI * r * r) / 1e6, 4)} A/mm²`],
+      ['Arc column at full scale', volts(arcVoltage(iMax, sigma, r, len).V)],
+      ['Arc gradient there', `${sig(arcVoltage(iMax, sigma, r, len).E, 4)} V/m`],
+      ['Arc drop as % of system voltage', `${sig(100 * arcVoltage(iMax, sigma, r, len).V / sysV, 3)} %`],
+      ['Power lost in the arc', watts(iMax * arcVoltage(iMax, sigma, r, len).V)]
     ]);
 
     /* A discharge characteristic runs over decades of current, so sample and plot
        it logarithmically — on a linear axis the whole normal-glow plateau collapses
        onto the left edge and the knee is invisible. */
-    const iMin = Math.pow(10, Math.floor(Math.log10(iMax)) - 5);
-    const N = 160;
+    const iMin = Math.pow(10, Math.floor(Math.log10(iMax)) - 8);
+    const N = 220;
     const series = pressures.map((p, k) => {
       const pts = [];
-      let knee = null;
+      let knee = null, arcAt = null;
       for (let j = 0; j <= N; j++) {
         const I = iMin * Math.pow(iMax / iMin, j / N);
         const t = tubeVoltage(I, gas, p, r, len, cathArea);
-        // Past roughly a hundred times the normal current density the cathode runs
-        // hot enough to emit thermionically and the glow collapses into an arc.
-        // The model does not cover that, so the curve stops rather than pretending.
-        pts.push({ i: I, v: t.V, valid: I <= ARC_RATIO * t.In });
-        if (!knee && I >= t.In) knee = { i: t.In, v: t.V, In: t.In };
+        if (I <= ARC_RATIO * t.In) {
+          // Glow: cathode fall plus a column whose gradient is set by pressure.
+          pts.push({ i: I, v: t.V, regime: 'glow' });
+          if (!knee && I >= t.In) knee = { i: t.In, v: t.V, In: t.In };
+        } else if (I >= MIN_ARC) {
+          // Arc: the cathode has gone thermionic and the column is a hot plasma.
+          if (!arcAt) arcAt = Math.max(ARC_RATIO * t.In, MIN_ARC);
+          pts.push({ i: I, v: arcVoltage(I, sigma, r, len).V, regime: 'arc' });
+        } else {
+          // Between the two the discharge sustains neither — it is the unstable
+          // transition, and drawing a line through it would be invention.
+          pts.push({ i: I, v: NaN, valid: false });
+        }
       }
       const t0 = tubeVoltage(iMax, gas, p, r, len, cathArea);
-      return { label: `${sig(p / TORR, 3)} Torr`, color: RAMP[k], pts, knee, info: t0, p };
+      return { label: `${sig(p / TORR, 3)} Torr`, color: RAMP[k], pts, knee, info: t0, arcAt, p };
     });
 
-    const all = series.flatMap(s => s.pts.filter(q => q.valid).map(q => q.v));
-    const vMax = niceMax(Math.max(...all) * 1.05);
-    els.chartCaption.textContent = 'Voltage across the tube against current (log scale)';
-    drawChart(series, iMax, 0, vMax, 'Current', true, iMin);
+    /* Voltages run from a few hundred volts of glow to megavolts of arc, so the
+       vertical axis has to be logarithmic too or one regime vanishes. */
+    const all = series.flatMap(s => s.pts.map(q => q.v)).filter(v => v > 0 && isFinite(v));
+    if (!all.length) return fail('Nothing to plot at these settings — widen the current range.');
+    const vLo = Math.pow(10, Math.floor(Math.log10(Math.min(...all))));
+    const vHi = Math.pow(10, Math.ceil(Math.log10(Math.max(...all))));
+    els.chartCaption.textContent = 'Voltage across the tube against current (both axes logarithmic)';
+    drawChart(series, iMax, vLo, vHi, 'Current', true, iMin, true);
     els.legend.innerHTML = series.map(s =>
       `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('');
 
     els.tableCaption.textContent = 'Where each curve turns';
     els.thead.innerHTML = '<tr><th>Fill pressure</th><th>Column gradient</th><th>Column voltage</th>' +
-      '<th>Normal glow up to</th><th>Glow gives out at</th><th>Volts there</th></tr>';
+      '<th>Normal glow up to</th><th>Arcs above</th><th>Volts at full scale</th></tr>';
     els.table.innerHTML = series.map(s => {
       const E = columnField(gas, s.p, r);
-      const arcAt = ARC_RATIO * s.info.In;
-      const last = [...s.pts].reverse().find(q => q.valid);
+      const arcAt = Math.max(ARC_RATIO * s.info.In, MIN_ARC);
+      const last = s.pts[s.pts.length - 1];
       return `<tr><td><i style="background:${s.color}"></i>${s.label}</td>` +
-        `<td>${sig(E, 4)} V/m</td><td>${sig(E * len, 4)} V</td>` +
+        `<td>${sig(E, 4)} V/m</td><td>${volts(E * len)}</td>` +
         `<td>${amps(s.info.In)}</td>` +
         `<td>${arcAt > iMax ? 'beyond axis' : amps(arcAt)}</td>` +
-        `<td>${last ? sig(last.v, 4) + ' V' : '—'}</td></tr>`;
+        `<td>${volts(last.v)} (${last.regime})</td></tr>`;
     }).join('');
 
-    els.modelNote.innerHTML = '<span class="note">A gas column is not a resistor. Below the ' +
+    const anyArc = series.some(s => s.pts.some(q => q.regime === 'arc'));
+    els.modelNote.innerHTML = '<span class="note">' + (anyArc
+      ? 'Two regimes are on this chart. The flat and rising branches are a <b>glow</b>, where ' +
+        'pressure sets everything. Above the transition the cathode goes thermionic and the column ' +
+        'becomes a hot plasma — an <b>arc</b>, which obeys Ohm\'s law against the plasma ' +
+        'conductivity and barely cares about pressure, which is why those branches lie on top of ' +
+        'one another. The step between them is a real voltage collapse, not a drawing artefact.<br><br>'
+      : '') + 'A gas column is not a resistor. Below the ' +
       'marked knee the discharge simply spreads over more of the cathode and the voltage barely ' +
       'moves — more current for free. Past the knee it has run out of cathode and the fall climbs. ' +
       'Raising the pressure costs volts per metre but lets the tube carry more current before it ' +
-      'turns the corner. Each curve stops where the current density reaches about a hundred times the normal value, since a real discharge collapses into an arc around there and this model does not follow it.</span>';
+      'turns the corner.</span>';
 
     els.footNote.textContent = 'Glow-discharge model: normal cathode fall and normal current density ' +
       'are tabulated values for an iron cathode; the positive-column gradient is an empirical fit ' +
@@ -718,8 +832,8 @@ footer a:hover { color: var(--gold2); }
       'the glow regime — it does not model the Townsend dark discharge below it or the arc above it.';
   }
 
-  ['kind','len','lenUnit','imax','iUnit','mat','temp','build','dia','nStrand','dStrand',
-   'gas','bore','cath','p1','p2','p3','p4','p5'].forEach(id => els[id].addEventListener('input', update));
+  ['kind','len','lenUnit','imax','iUnit','sysV','vUnit','mat','temp','build','dia','nStrand',
+   'dStrand','gas','bore','cath','sigma','p1','p2','p3','p4','p5'].forEach(id => els[id].addEventListener('input', update));
   els.kind.addEventListener('change', () => {
     // Discharge currents are milliamps; cable currents are amps.
     if (els.kind.value === 'tube') {
