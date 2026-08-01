@@ -284,26 +284,27 @@ footer a:hover { color: var(--gold2); }
      figure for clean electrodes at millimetre gaps. */
   const E_ELECTRODE = 20e6;    // V/m
 
-  /* A partial vacuum still holds residual gas. Permittivity of a gas tracks its
-     density (Clausius–Mossotti, dilute limit), so at v % vacuum the remaining
-     (100 − v) % of an atmosphere gives κ = 1 + (κ_air − 1)·(1 − v/100). */
-  const vacuumKappa = v => 1 + (KAPPA_AIR - 1) * (1 - v / 100);
+  /* A vacuum is only ever as good as its residual gas. Permittivity tracks gas
+     density (Clausius–Mossotti, dilute limit), so a chamber at pressure p holds
+     κ = 1 + (κ_air − 1)·p/P_atm — air at 1 atm falls out of this exactly. */
+  const MBAR = 100;   // Pa
+  const gasKappa = p => 1 + (KAPPA_AIR - 1) * p / P_ATM;
 
   /* Materials carry κ and either a bulk dielectric strength `e` (MV/m, i.e.
      kV/mm) or a gas pressure `p` (Pa) that selects the Paschen model.
      e === null means "no representative figure" rather than zero. */
-  const vacuumOptions = [];
-  for (let v = 80; v <= 95; v += 5) {
-    vacuumOptions.push({ name: `Vacuum, ${v}% (residual air)`, k: vacuumKappa(v), p: P_ATM * (1 - v / 100) });
-  }
-  vacuumOptions.push({ name: 'Vacuum, 99.95% (residual air)', k: vacuumKappa(99.95), p: P_ATM * (1 - 99.95 / 100) });
+  const vacuumOptions = [
+    { name: 'Medium vacuum — 1 mbar (0.1 % of atm)', p: 1 * MBAR },
+    { name: 'High vacuum — 1×10⁻³ mbar (10⁻⁴ % of atm)', p: 1e-3 * MBAR },
+    { name: 'Advanced high vacuum — 1×10⁻⁶ mbar (10⁻⁷ % of atm)', p: 1e-6 * MBAR }
+  ].map(v => ({ ...v, k: gasKappa(v.p) }));
 
   const GROUPS = [
     { label: 'Reference', items: [
       { name: 'Perfect vacuum', k: 1, p: 0 },
       { name: 'Air (dry, 1 atm, 20 °C)', k: KAPPA_AIR, p: P_ATM }
     ]},
-    { label: 'Partial vacuum', items: vacuumOptions },
+    { label: 'Achievable vacuum', items: vacuumOptions },
     { label: 'Plastics & films', items: [
       { name: 'PTFE (Teflon)', k: 2.1, e: 60 },
       { name: 'Polypropylene (PP)', k: 2.2, e: 65 },
@@ -505,7 +506,7 @@ footer a:hover { color: var(--gold2); }
       els.strength.disabled = true;
       els.strength.placeholder = mat.p > 0 ? 'set by Paschen’s law' : 'set by the electrodes';
       els.strengthHint.textContent = mat.p > 0
-        ? `Gas at ${sig(mat.p, 4)} Pa — breakdown depends on pressure × gap, not gap alone.`
+        ? `Residual gas at ${sig(mat.p / MBAR, 4)} mbar (${sig(mat.p, 4)} Pa) — breakdown depends on pressure × gap, not gap alone.`
         : 'No gas to ionise — breakdown is set by the electrode surfaces.';
     } else {
       gasPressure = null;
