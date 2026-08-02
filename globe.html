@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Netherlayer Globe — Orbit to Sea Level</title>
+<meta name="description" content="A browser based 3D earth. Spin the globe, zoom through continent, region and valley scale, and fly down to sea level over real terrain."/>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css"/>
+<style>
+/* ─── Design tokens (shared with the Netherlayer site) ─── */
+:root {
+  --bg:       #0e0e1c;
+  --surface:  #0e0e1c;
+  --raised:   #13132a;
+  --sh-dark:  #07070f;
+  --sh-light: #191933;
+  --gold:     #d4af37;
+  --gold2:    #f0c040;
+  --text:     #d8d8f0;
+  --muted:    #7070a0;
+  --accent:   #e67e22;
+  --green:    #2ecc71;
+  --red:      #e74c3c;
+  --radius:   16px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--gold); text-decoration: none; }
+a:hover { color: var(--gold2); }
+
+#map { position: absolute; inset: 0; background: #05050c; }
+
+/* ─── Neomorphic surfaces ─── */
+.nm {
+  background: rgba(14,14,28,.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(212,175,55,.16);
+  box-shadow: 6px 6px 18px rgba(7,7,15,.75), -1px -1px 10px rgba(25,25,51,.6);
+  border-radius: var(--radius);
+}
+
+/* ─── Top bar ─── */
+#topbar {
+  position: absolute; top: 14px; left: 14px; z-index: 20;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px;
+}
+#topbar .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .14em; font-size: 13px; color: var(--gold); }
+#topbar .sep { width: 1px; height: 18px; background: rgba(212,175,55,.25); }
+#topbar .tagline { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+@media (max-width: 720px) { #topbar .sep, #topbar .tagline { display: none; } }
+
+/* ─── Control panel ─── */
+#panel {
+  position: absolute; top: 68px; left: 14px; z-index: 20;
+  width: 290px; max-height: calc(100% - 190px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 14px;
+}
+#panel::-webkit-scrollbar { width: 8px; }
+#panel::-webkit-scrollbar-thumb { background: rgba(212,175,55,.22); border-radius: 8px; }
+#panel.collapsed { display: none; }
+
+.grp { margin-bottom: 16px; }
+.grp:last-child { margin-bottom: 4px; }
+.grp > h3 {
+  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; margin-bottom: 8px;
+}
+
+/* form controls */
+select, input[type=text] {
+  width: 100%; padding: 9px 11px;
+  background: #0a0a16; color: var(--text);
+  border: 1px solid rgba(212,175,55,.2); border-radius: 10px;
+  font: inherit; font-size: 13px; outline: none;
+}
+select:focus, input[type=text]:focus { border-color: var(--gold); }
+input[type=text]::placeholder { color: #55557a; }
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; }
+.row label { font-size: 13px; color: var(--text); cursor: pointer; }
+.row .val { font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
+
+/* toggle switch */
+.sw { position: relative; width: 40px; height: 22px; flex: none; }
+.sw input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; position: relative; z-index: 2; }
+.sw span {
+  position: absolute; inset: 0; border-radius: 22px; pointer-events: none;
+  background: #0a0a16; box-shadow: inset 2px 2px 5px var(--sh-dark), inset -2px -2px 5px rgba(25,25,51,.8);
+  transition: background .2s;
+}
+.sw span::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+  border-radius: 50%; background: #4a4a70; transition: transform .2s, background .2s;
+}
+.sw input:checked + span { box-shadow: inset 2px 2px 5px var(--sh-dark); }
+.sw input:checked + span::after { transform: translateX(18px); background: var(--gold); }
+
+input[type=range] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin: 8px 0 2px;
+  background: linear-gradient(90deg, var(--gold3, #7a5c00), rgba(212,175,55,.25));
+  border-radius: 4px; outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--gold); cursor: pointer; box-shadow: 0 0 8px rgba(212,175,55,.5);
+}
+input[type=range]::-moz-range-thumb {
+  width: 16px; height: 16px; border: none; border-radius: 50%;
+  background: var(--gold); cursor: pointer;
+}
+
+/* buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 12px; width: 100%;
+  background: #0a0a16; color: var(--text);
+  border: 1px solid rgba(212,175,55,.22); border-radius: 10px;
+  font: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: .03em;
+  cursor: pointer; transition: all .18s;
+}
+.btn:hover { border-color: var(--gold); color: var(--gold2); transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn.primary { background: linear-gradient(135deg, rgba(212,175,55,.18), rgba(212,175,55,.06)); color: var(--gold2); }
+.btn-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* preset chips */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  padding: 5px 10px; font-size: 11.5px; border-radius: 20px; cursor: pointer;
+  background: #0a0a16; color: var(--muted);
+  border: 1px solid rgba(212,175,55,.16); transition: all .16s;
+}
+.chip:hover { color: var(--gold2); border-color: var(--gold); }
+
+.hint { font-size: 11.5px; color: var(--muted); line-height: 1.65; }
+.hint b { color: #9a9ac8; font-weight: 600; }
+
+/* ─── HUD ─── */
+#hud {
+  position: absolute; left: 14px; bottom: 14px; z-index: 20;
+  display: grid; grid-template-columns: repeat(4, minmax(62px, auto));
+  gap: 2px 18px; padding: 10px 16px;
+  font-variant-numeric: tabular-nums;
+}
+#hud .k { font-size: 9px; letter-spacing: .13em; color: var(--muted); text-transform: uppercase; }
+#hud .v { font-size: 13px; color: var(--gold2); font-weight: 600; }
+@media (max-width: 720px) {
+  #hud { grid-template-columns: repeat(3, minmax(56px, auto)); gap: 2px 12px; padding: 8px 12px; }
+  #hud .v { font-size: 12px; }
+}
+
+/* ─── Panel toggle + attribution nudge ─── */
+#panel-btn {
+  position: absolute; top: 68px; left: 14px; z-index: 21;
+  width: 40px; height: 40px; display: none;
+  align-items: center; justify-content: center; cursor: pointer;
+  color: var(--gold); font-size: 17px;
+}
+#panel.collapsed + #panel-btn, #panel-btn.show { display: flex; }
+
+/* ─── Loader ─── */
+#loader {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+  background: radial-gradient(circle at 50% 45%, #12122a, #05050c 70%);
+  transition: opacity .7s ease; text-align: center; padding: 20px;
+}
+#loader.gone { opacity: 0; pointer-events: none; }
+.orbit { width: 74px; height: 74px; position: relative; }
+.orbit::before, .orbit::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid transparent; border-top-color: var(--gold); animation: spin 1.4s linear infinite;
+}
+.orbit::after { inset: 13px; border-top-color: var(--accent); animation-duration: .9s; animation-direction: reverse; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loader .t { font-size: 12px; letter-spacing: .22em; color: var(--muted); text-transform: uppercase; }
+
+/* ─── Toast ─── */
+#toast {
+  position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(12px);
+  z-index: 30; padding: 10px 16px; font-size: 12.5px; color: var(--text);
+  opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; max-width: 80vw;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ─── MapLibre chrome restyle ─── */
+.maplibregl-ctrl-group {
+  background: rgba(14,14,28,.88) !important;
+  border: 1px solid rgba(212,175,55,.16) !important;
+  border-radius: 12px !important;
+  box-shadow: 4px 4px 14px rgba(7,7,15,.7) !important;
+  overflow: hidden;
+}
+.maplibregl-ctrl-group button + button { border-top: 1px solid rgba(212,175,55,.12) !important; }
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(78%) sepia(38%) saturate(520%) hue-rotate(2deg) brightness(94%); }
+.maplibregl-ctrl-group button:hover { background: rgba(212,175,55,.12) !important; }
+.maplibregl-ctrl-scale {
+  background: rgba(14,14,28,.75) !important; color: var(--muted) !important;
+  border-color: rgba(212,175,55,.3) !important; border-radius: 0 0 6px 6px; font-size: 10px;
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(14,14,28,.8) !important; border-radius: 10px 0 0 0;
+  font-size: 10.5px; max-width: 62vw;
+}
+.maplibregl-ctrl-attrib a { color: #8a8ab8 !important; }
+.maplibregl-ctrl-bottom-right { z-index: 15; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- ── Top bar ── -->
+<div id="topbar" class="nm">
+  <div class="logo">
+    <svg width="18" height="18" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+      <polygon points="11,1 14,8 21,8.5 16,13.5 17.5,21 11,17 4.5,21 6,13.5 1,8.5 8,8" fill="#d4af37" opacity=".9"/>
+    </svg>
+    <a href="index.html" style="color:inherit">NETHERLAYER</a>
+  </div>
+  <div class="sep"></div>
+  <div class="tagline">Globe → Sea Level</div>
+</div>
+
+<!-- ── Control panel ── -->
+<div id="panel" class="nm">
+  <div class="grp">
+    <h3>Surface</h3>
+    <select id="basemap" aria-label="Base imagery">
+      <option value="imagery">Satellite imagery</option>
+      <option value="topo">Topographic</option>
+      <option value="street">Street</option>
+      <option value="ocean">Ocean floor</option>
+      <option value="dark">Dark carto</option>
+    </select>
+    <div class="row" style="margin-top:8px">
+      <label for="labels">Place labels</label>
+      <span class="sw"><input type="checkbox" id="labels"/><span></span></span>
+    </div>
+    <div class="row">
+      <label for="hillshade">Relief shading</label>
+      <span class="sw"><input type="checkbox" id="hillshade" checked/><span></span></span>
+    </div>
+  </div>
+
+  <div class="grp">
+    <h3>Terrain</h3>
+    <div class="row">
+      <label for="terrain">3D elevation</label>
+      <span class="sw"><input type="checkbox" id="terrain" checked/><span></span></span>
+    </div>
+    <div class="row" style="padding-bottom:0">
+      <label for="exag">Vertical scale</label>
+      <span class="val" id="exag-val">1.4×</span>
+    </div>
+    <input type="range" id="exag" min="0.2" max="4" step="0.1" value="1.4"/>
+    <div class="row" style="margin-top:6px">
+      <label for="sky">Atmosphere</label>
+      <span class="sw"><input type="checkbox" id="sky" checked/><span></span></span>
+    </div>
+  </div>
+
+  <div class="grp">
+    <h3>Camera</h3>
+    <div class="btn-2">
+      <button class="btn primary" id="descend">▼ Descend</button>
+      <button class="btn" id="orbit">▲ Orbit</button>
+    </div>
+    <div class="btn-2" style="margin-top:8px">
+      <button class="btn" id="spin">↻ Spin</button>
+      <button class="btn" id="north">⌖ North up</button>
+    </div>
+  </div>
+
+  <div class="grp">
+    <h3>Fly to</h3>
+    <input type="text" id="search" placeholder="Search a place, then ↵" autocomplete="off" spellcheck="false"/>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="grp">
+    <h3>Controls</h3>
+    <p class="hint">
+      <b>Drag</b> pan · <b>Scroll</b> zoom · <b>Right-drag</b> rotate &amp; tilt<br/>
+      <b>Ctrl+drag</b> tilt · <b>Shift+drag</b> box zoom<br/>
+      Touch: <b>one finger</b> pan · <b>pinch</b> zoom &amp; twist · <b>two-finger drag</b> tilt
+    </p>
+  </div>
+</div>
+<div id="panel-btn" class="nm" title="Show controls">☰</div>
+
+<!-- ── HUD ── -->
+<div id="hud" class="nm">
+  <div><div class="k">Lat</div><div class="v" id="h-lat">—</div></div>
+  <div><div class="k">Lon</div><div class="v" id="h-lon">—</div></div>
+  <div><div class="k">Ground</div><div class="v" id="h-elev">—</div></div>
+  <div><div class="k">Eye alt</div><div class="v" id="h-alt">—</div></div>
+  <div><div class="k">Zoom</div><div class="v" id="h-zoom">—</div></div>
+  <div><div class="k">Scale</div><div class="v" id="h-scale">—</div></div>
+  <div><div class="k">Heading</div><div class="v" id="h-brg">—</div></div>
+  <div><div class="k">Tilt</div><div class="v" id="h-pitch">—</div></div>
+</div>
+
+<div id="toast" class="nm"></div>
+
+<div id="loader">
+  <div class="orbit"></div>
+  <div class="t">Assembling the earth</div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ────────────────────────────────────────────────────────────
+     Tile services — all open, none require an API key.
+     Imagery/topo/street/ocean : Esri ArcGIS Online tile services
+     Dark basemap              : CARTO basemaps
+     Elevation                 : AWS Open Data terrain tiles (Terrarium PNG)
+     ──────────────────────────────────────────────────────────── */
+  var ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+  var ESRI_ATTR = '<a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a>, Maxar, Earthstar Geographics, USGS, NASA';
+  var DEM_ATTR = '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> — SRTM / GMTED / NED / ETOPO1';
+
+  function esriSource(path, maxzoom, attr) {
+    return {
+      type: 'raster',
+      tiles: [ESRI + path + '/MapServer/tile/{z}/{y}/{x}'],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: maxzoom,
+      attribution: attr || ESRI_ATTR
+    };
+  }
+
+  var style = {
+    version: 8,
+    name: 'Netherlayer Globe',
+    projection: { type: 'globe' },
+    sources: {
+      imagery: esriSource('World_Imagery', 19),
+      topo:    esriSource('World_Topo_Map', 19),
+      street:  esriSource('World_Street_Map', 19),
+      ocean:   esriSource('Ocean/World_Ocean_Base', 13),
+      dark: {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+          'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+          'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> · &copy; OpenStreetMap contributors'
+      },
+      labels: {
+        type: 'raster',
+        tiles: [ESRI + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: ESRI_ATTR
+      },
+      dem: {
+        type: 'raster-dem',
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        minzoom: 0,
+        maxzoom: 15,
+        encoding: 'terrarium',
+        attribution: DEM_ATTR
+      }
+    },
+    /* Sky + atmosphere: black space out at orbit, blue haze near the ground. */
+    sky: {
+      'sky-color': '#1b3a63',
+      'sky-horizon-blend': 0.6,
+      'horizon-color': '#a5c4e6',
+      'horizon-fog-blend': 0.55,
+      'fog-color': '#c9d9ec',
+      'fog-ground-blend': 0.72,
+      'atmosphere-blend': [
+        'interpolate', ['linear'], ['zoom'],
+        0, 1,     /* full atmosphere ring from orbit  */
+        5, 1,
+        9, 0.35,  /* fades out as we approach the deck */
+        13, 0
+      ]
+    },
+    terrain: { source: 'dem', exaggeration: 1.4 },
+    layers: [
+      { id: 'space', type: 'background', paint: { 'background-color': '#050510' } },
+      { id: 'imagery', type: 'raster', source: 'imagery', paint: { 'raster-fade-duration': 250 } },
+      { id: 'topo',   type: 'raster', source: 'topo',   layout: { visibility: 'none' } },
+      { id: 'street', type: 'raster', source: 'street', layout: { visibility: 'none' } },
+      { id: 'ocean',  type: 'raster', source: 'ocean',  layout: { visibility: 'none' } },
+      { id: 'dark',   type: 'raster', source: 'dark',   layout: { visibility: 'none' } },
+      {
+        id: 'hillshade', type: 'hillshade', source: 'dem',
+        paint: {
+          'hillshade-exaggeration': 0.42,
+          'hillshade-shadow-color': '#0a0a18',
+          'hillshade-highlight-color': '#fff4d6',
+          'hillshade-accent-color': '#2a2a44'
+        }
+      },
+      { id: 'labels', type: 'raster', source: 'labels', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.9 } }
+    ]
+  };
+
+  var map;
+  try {
+    map = new maplibregl.Map({
+      container: 'map',
+      style: style,
+      center: [134.5, -24.5],
+      zoom: 1.35,
+      pitch: 0,
+      bearing: 0,
+      maxPitch: 85,
+      maxZoom: 18.5,
+      hash: true,           /* deep-linkable camera in the URL */
+      antialias: true,
+      attributionControl: { compact: true }
+    });
+  } catch (err) {
+    var why = (typeof maplibregl === 'undefined')
+      ? 'The map library could not be downloaded — check the network connection and reload.'
+      : 'This globe needs WebGL 2. Try a current Chrome, Firefox, Safari or Edge with hardware acceleration enabled.';
+    document.getElementById('loader').innerHTML =
+      '<div class="t" style="letter-spacing:.08em;max-width:440px;line-height:1.8">' + why + '</div>';
+    return;
+  }
+
+  /* Handy from the browser console. */
+  window.netherlayerGlobe = map;
+
+  /* ── Chrome ─────────────────────────────────────────────── */
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true, showZoom: true, showCompass: true }), 'top-right');
+  map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false }), 'top-right');
+  map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+  map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' }), 'bottom-right');
+  map.touchZoomRotate.enableRotation();
+  map.dragRotate.enable();
+
+  var $ = function (id) { return document.getElementById(id); };
+  var exaggeration = 1.4;
+  var terrainOn = true;
+
+  /* ── Toast ──────────────────────────────────────────────── */
+  var toastTimer;
+  function toast(msg, ms) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, ms || 2600);
+  }
+
+  /* ── HUD ────────────────────────────────────────────────── */
+  function fmtLat(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'N' : 'S'); }
+  function fmtLon(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'E' : 'W'); }
+  function group(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function fmtDist(m) {
+    if (m === null || m === undefined || !isFinite(m)) return '—';
+    if (Math.abs(m) >= 100000) return group((m / 1000).toFixed(0)) + ' km';
+    if (Math.abs(m) >= 1000) return (m / 1000).toFixed(1) + ' km';
+    return Math.round(m) + ' m';
+  }
+
+  /* Metres of ground covered by one screen pixel at the view centre.
+     MapLibre zoom levels are 512 px tiles, so z0 is one 512 px world. */
+  function metresPerPixel() {
+    var lat = map.getCenter().lat;
+    return 40075016.686 * Math.cos(lat * Math.PI / 180) / (512 * Math.pow(2, map.getZoom()));
+  }
+
+  /* Height of the eye above sea level, in metres. Neither transform
+     reports this reliably (the globe helper has no metres-per-pixel),
+     so derive it from the camera geometry. */
+  function cameraAltitude() {
+    try {
+      var t = map.transform;
+      var fov = ((t && t.fov) || 36.87) * Math.PI / 180;
+      var eyePx = (map.getCanvas().clientHeight / 2) / Math.tan(fov / 2);
+      var world = 512 * Math.pow(2, map.getZoom());
+      var globeRadiusPx = world / (2 * Math.PI);
+
+      /* Far enough out that the sphere sits entirely ahead of the eye:
+         measure straight off the globe's surface. */
+      if (eyePx > globeRadiusPx * 1.25) {
+        return (eyePx - globeRadiusPx) * (40075016.686 / world);
+      }
+      /* Close in the view is effectively flat: rise above the centre. */
+      var ground = (t && isFinite(t.elevation)) ? t.elevation : 0;
+      return ground + eyePx * metresPerPixel() * Math.cos(map.getPitch() * Math.PI / 180);
+    } catch (e) { return null; }
+  }
+
+  /* True ground height at the view centre (queryTerrainElevation is exaggerated). */
+  function groundElevation() {
+    if (!terrainOn || !map.queryTerrainElevation) return null;
+    var raw = map.queryTerrainElevation(map.getCenter());
+    if (raw === null || raw === undefined || !isFinite(raw)) return null;
+    return raw / (exaggeration || 1);
+  }
+
+  function updateHud() {
+    var c = map.getCenter();
+    $('h-lat').textContent = fmtLat(c.lat);
+    $('h-lon').textContent = fmtLon(c.lng);
+    $('h-zoom').textContent = map.getZoom().toFixed(2);
+    $('h-brg').textContent = ((map.getBearing() + 360) % 360).toFixed(0) + '°';
+    $('h-pitch').textContent = map.getPitch().toFixed(0) + '°';
+    $('h-alt').textContent = fmtDist(cameraAltitude());
+
+    var mpp = metresPerPixel();
+    $('h-scale').textContent = mpp >= 1000 ? (mpp / 1000).toFixed(1) + ' km/px'
+                             : mpp >= 1 ? mpp.toFixed(0) + ' m/px'
+                             : (mpp * 100).toFixed(0) + ' cm/px';
+
+    var elev = groundElevation();
+    $('h-elev').textContent = elev === null ? '—' : fmtDist(elev);
+  }
+  map.on('move', updateHud);
+  map.on('moveend', updateHud);
+
+  /* The terrain mesh stops well short of the true horizon, so at a steep
+     tilt a sliver of untouched canvas shows between the far ridges and
+     the sky. Paint that sliver the colour of the haze it sits in. */
+  function updateVoid() {
+    var haze = terrainOn && map.getZoom() > 8 && map.getPitch() > 45;
+    $('map').style.background = haze ? '#a9c5e2' : '#05050c';
+  }
+  map.on('move', updateVoid);
+
+  /* ────────────────────────────────────────────────────────────
+     Keep the eye above the ground.
+
+     A flight locks in its target ground height when it starts, so a
+     long flyTo onto a mountain arrives with the camera still sitting
+     at the elevation it expected before the DEM tiles turned up — i.e.
+     underground. Re-assert the camera whenever the transform's idea of
+     the centre height has drifted from the terrain that is now loaded.
+     ──────────────────────────────────────────────────────────── */
+  var settling = false, settleTimer = null;
+  function settleCamera() {
+    /* Only matters once we are close enough for terrain to reach the eye. */
+    if (!terrainOn || settling || map.getZoom() < 8) return;
+    if (map.isMoving() || map.isEasing()) return;
+    var t = map.transform;
+    if (!t || typeof t.elevation !== 'number') return;
+    var here = map.queryTerrainElevation(map.getCenter());
+    if (here === null || here === undefined || !isFinite(here)) return;
+    if (Math.abs(t.elevation - here) < 10) return;
+    settling = true;
+    map.jumpTo({
+      center: map.getCenter(), zoom: map.getZoom(),
+      bearing: map.getBearing(), pitch: map.getPitch()
+    });
+    settling = false;
+    updateHud();
+  }
+  /* DEM tiles keep arriving for a while after a flight lands, so check
+     back a few times rather than once. */
+  function scheduleSettle() {
+    clearInterval(settleTimer);
+    var tries = 0;
+    settleTimer = setInterval(function () {
+      settleCamera();
+      updateHud();
+      if (++tries >= 8) clearInterval(settleTimer);
+    }, 700);
+  }
+  map.on('moveend', scheduleSettle);
+  map.on('sourcedata', function (e) { if (e.sourceId === 'dem') scheduleSettle(); });
+  map.on('terrain', scheduleSettle);
+  map.on('idle', updateHud);
+
+  /* ── Basemap switching ──────────────────────────────────── */
+  var BASEMAPS = ['imagery', 'topo', 'street', 'ocean', 'dark'];
+  $('basemap').addEventListener('change', function (e) {
+    var pick = e.target.value;
+    BASEMAPS.forEach(function (id) {
+      map.setLayoutProperty(id, 'visibility', id === pick ? 'visible' : 'none');
+    });
+    /* Relief shading reads better light on imagery, darker on the flat maps. */
+    var onImagery = pick === 'imagery';
+    map.setPaintProperty('hillshade', 'hillshade-exaggeration', onImagery ? 0.42 : 0.6);
+  });
+
+  $('labels').addEventListener('change', function (e) {
+    map.setLayoutProperty('labels', 'visibility', e.target.checked ? 'visible' : 'none');
+  });
+  $('hillshade').addEventListener('change', function (e) {
+    map.setLayoutProperty('hillshade', 'visibility', e.target.checked ? 'visible' : 'none');
+  });
+
+  /* ── Terrain ────────────────────────────────────────────── */
+  function applyTerrain() {
+    map.setTerrain(terrainOn ? { source: 'dem', exaggeration: exaggeration } : null);
+  }
+  $('terrain').addEventListener('change', function (e) {
+    terrainOn = e.target.checked;
+    applyTerrain();
+    updateVoid();
+    if (!terrainOn && map.getPitch() > 60) map.easeTo({ pitch: 45, duration: 600 });
+  });
+  $('exag').addEventListener('input', function (e) {
+    exaggeration = parseFloat(e.target.value);
+    $('exag-val').textContent = exaggeration.toFixed(1) + '×';
+    if (terrainOn) applyTerrain();
+  });
+
+  /* ── Atmosphere ─────────────────────────────────────────── */
+  $('sky').addEventListener('change', function (e) {
+    map.setSky(e.target.checked ? style.sky : {
+      'sky-color': '#050510', 'horizon-color': '#050510', 'fog-color': '#050510',
+      'atmosphere-blend': 0
+    });
+  });
+
+  /* ── Camera moves ───────────────────────────────────────── */
+  /* Descend: orbit → valley floor, in one continuous arc. */
+  $('descend').addEventListener('click', function () {
+    stopSpin();
+    var c = map.getCenter();
+    map.flyTo({
+      center: [c.lng, c.lat],
+      zoom: Math.max(map.getZoom(), 14.2),
+      pitch: 80,
+      bearing: (map.getBearing() + 35) % 360,
+      duration: 9000,
+      curve: 1.5,
+      freezeElevation: true,
+      essential: true
+    });
+    toast('Descending to the surface — grab the view any time to take over');
+  });
+
+  $('orbit').addEventListener('click', function () {
+    stopSpin();
+    map.flyTo({ center: map.getCenter(), zoom: 1.4, pitch: 0, bearing: 0, duration: 4500, freezeElevation: true, essential: true });
+  });
+
+  $('north').addEventListener('click', function () {
+    map.easeTo({ bearing: 0, pitch: map.getPitch() > 60 ? 60 : map.getPitch(), duration: 700 });
+  });
+
+  /* Idle spin, for the globe view. */
+  var spinning = false, spinRaf = null, lastT = 0;
+  function spinStep(t) {
+    if (!spinning) return;
+    var dt = lastT ? (t - lastT) / 1000 : 0;
+    lastT = t;
+    /* 360° in ~2 minutes, eased down as you zoom in so it never fights you */
+    var rate = 3 * Math.max(0, 1 - map.getZoom() / 5);
+    if (rate > 0) {
+      var c = map.getCenter();
+      map.setCenter([c.lng + rate * dt, c.lat]);
+    }
+    spinRaf = requestAnimationFrame(spinStep);
+  }
+  function startSpin() {
+    spinning = true; lastT = 0;
+    $('spin').textContent = '⏸ Stop';
+    spinRaf = requestAnimationFrame(spinStep);
+  }
+  function stopSpin() {
+    spinning = false;
+    if (spinRaf) cancelAnimationFrame(spinRaf);
+    spinRaf = null;
+    $('spin').textContent = '↻ Spin';
+  }
+  $('spin').addEventListener('click', function () { spinning ? stopSpin() : startSpin(); });
+  map.on('mousedown', stopSpin);
+  map.on('touchstart', stopSpin);
+  map.on('wheel', stopSpin);
+
+  /* ── Places ─────────────────────────────────────────────── */
+  var PLACES = [
+    { n: 'Everest',      c: [86.925, 27.985], z: 12.6, p: 76, b: 200 },
+    { n: 'Grand Canyon', c: [-112.12, 36.075], z: 13.4, p: 78, b: 320 },
+    { n: 'Matterhorn',   c: [7.658, 45.977],  z: 13.2, p: 80, b: 20 },
+    { n: 'Yosemite',     c: [-119.556, 37.735], z: 13.6, p: 80, b: 90 },
+    { n: 'Milford Sound',c: [167.85, -44.63], z: 12.8, p: 82, b: 250 },
+    { n: 'Uluru',        c: [131.036, -25.345], z: 14.2, p: 76, b: 300 },
+    { n: 'Fuji',         c: [138.727, 35.36],  z: 12.4, p: 74, b: 340 },
+    { n: 'Denali',       c: [-151.007, 63.069], z: 11.8, p: 76, b: 180 },
+    { n: 'Torres del Paine', c: [-72.99, -50.99], z: 12.4, p: 80, b: 40 },
+    { n: 'Iceland',      c: [-16.65, 64.42],  z: 10.4, p: 72, b: 210 },
+    { n: 'Big Island',   c: [-155.47, 19.53], z: 10.6, p: 74, b: 130 },
+    { n: 'Dead Sea',     c: [35.5, 31.5],     z: 11.5, p: 72, b: 0 },
+    { n: 'Mariana Trench', c: [142.2, 11.35], z: 8.5,  p: 60, b: 0, base: 'ocean' },
+    { n: 'Whole earth',  c: [134.5, -24.5],   z: 1.35, p: 0,  b: 0 }
+  ];
+
+  function goTo(p) {
+    stopSpin();
+    if (p.base) {
+      $('basemap').value = p.base;
+      $('basemap').dispatchEvent(new Event('change'));
+    }
+    map.flyTo({
+      center: p.c, zoom: p.z, pitch: p.p, bearing: p.b,
+      duration: 6000, curve: 1.42, freezeElevation: true, essential: true
+    });
+  }
+
+  var chips = $('chips');
+  PLACES.forEach(function (p) {
+    var el = document.createElement('button');
+    el.className = 'chip';
+    el.type = 'button';
+    el.textContent = p.n;
+    el.addEventListener('click', function () { goTo(p); });
+    chips.appendChild(el);
+  });
+
+  /* ── Search (OpenStreetMap Nominatim, one request per submit) ── */
+  var searching = false;
+  $('search').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    var q = e.target.value.trim();
+    if (!q || searching) return;
+    searching = true;
+    toast('Searching “' + q + '”…', 6000);
+    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q))
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (hits) {
+        if (!hits.length) { toast('No match for “' + q + '”'); return; }
+        var h = hits[0];
+        goTo({ c: [parseFloat(h.lon), parseFloat(h.lat)], z: 12.5, p: 72, b: map.getBearing() });
+        toast(h.display_name.split(',').slice(0, 3).join(','));
+      })
+      .catch(function () { toast('Search is unavailable right now — try the presets'); })
+      .finally(function () { searching = false; });
+  });
+
+  /* ── Panel collapse (small screens) ─────────────────────── */
+  var panel = $('panel'), panelBtn = $('panel-btn');
+  panelBtn.addEventListener('click', function () {
+    panel.classList.remove('collapsed');
+    panelBtn.classList.remove('show');
+  });
+  function autoCollapse() {
+    if (window.innerWidth < 620) {
+      panel.classList.add('collapsed');
+      panelBtn.classList.add('show');
+    }
+  }
+  window.addEventListener('resize', function () {
+    if (window.innerWidth >= 620) { panel.classList.remove('collapsed'); panelBtn.classList.remove('show'); }
+  });
+
+  /* Tapping the map closes the panel on phones. */
+  map.on('click', function () {
+    if (window.innerWidth < 620 && !panel.classList.contains('collapsed')) {
+      panel.classList.add('collapsed');
+      panelBtn.classList.add('show');
+    }
+  });
+
+  /* ── Keyboard extras ────────────────────────────────────── */
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.key === 'd') $('descend').click();
+    else if (e.key === 'o') $('orbit').click();
+    else if (e.key === 's') $('spin').click();
+    else if (e.key === 'n') $('north').click();
+  });
+
+  /* ── Boot ───────────────────────────────────────────────── */
+  var demErrors = 0;
+  map.on('error', function (e) {
+    var msg = (e && e.error && e.error.message) || '';
+    if (/terrarium|elevation-tiles/.test(msg)) {
+      if (++demErrors === 12) toast('Some elevation tiles failed to load — terrain may be patchy here');
+    }
+  });
+
+  map.on('load', function () {
+    applyTerrain();
+    updateHud();
+    updateVoid();
+    autoCollapse();
+    $('loader').classList.add('gone');
+    setTimeout(function () { $('loader').style.display = 'none'; }, 800);
+
+    /* If the URL has no #hash camera, open with a slow reveal of the globe. */
+    if (!location.hash) {
+      startSpin();
+      setTimeout(function () {
+        toast('Scroll to zoom · right-drag to tilt · press D to descend', 4200);
+      }, 1400);
+    }
+  });
+})();
+</script>
+</body>
+</html>
