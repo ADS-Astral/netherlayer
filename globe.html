@@ -25,6 +25,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }   /* beats the .btn-2 grid rule */
 html, body { height: 100%; overflow: hidden; }
 body {
   background: var(--bg);
@@ -62,7 +63,7 @@ a:hover { color: var(--gold2); }
 /* ─── Control panel ─── */
 #panel {
   position: absolute; top: 68px; left: 14px; z-index: 20;
-  width: 290px; max-height: calc(100% - 190px);
+  width: 290px; max-height: calc(100% - 168px);
   overflow-y: auto; overscroll-behavior: contain;
   padding: 14px;
 }
@@ -78,14 +79,54 @@ a:hover { color: var(--gold2); }
 }
 
 /* form controls */
-select, input[type=text] {
+select, input[type=text], input[type=number] {
   width: 100%; padding: 9px 11px;
   background: #0a0a16; color: var(--text);
   border: 1px solid rgba(212,175,55,.2); border-radius: 10px;
   font: inherit; font-size: 13px; outline: none;
 }
-select:focus, input[type=text]:focus { border-color: var(--gold); }
+select:focus, input[type=text]:focus, input[type=number]:focus { border-color: var(--gold); }
 input[type=text]::placeholder { color: #55557a; }
+
+/* two fields side by side, each with a caption above */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pair label {
+  display: block; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700;
+}
+.pair input { margin-top: 4px; }
+
+input[type=color] {
+  width: 40px; height: 24px; padding: 0; flex: none; cursor: pointer;
+  background: none; border: 1px solid rgba(212,175,55,.28); border-radius: 6px;
+}
+input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
+input[type=color]::-webkit-color-swatch { border: none; border-radius: 4px; }
+
+/* placed-object list */
+#cyl-list { margin-top: 10px; max-height: 132px; overflow-y: auto; }
+#cyl-list:empty { display: none; }
+#cyl-list .obj {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 7px; margin-bottom: 4px; border-radius: 8px;
+  background: #0a0a16; border: 1px solid rgba(212,175,55,.12);
+  font-size: 11px; color: var(--muted); cursor: pointer;
+}
+#cyl-list .obj:hover { border-color: rgba(212,175,55,.45); color: var(--text); }
+#cyl-list .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+#cyl-list .obj span.t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cyl-list .obj button {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font: inherit; font-size: 12px; padding: 0 2px;
+}
+#cyl-list .obj button:hover { color: var(--red); }
+
+/* placing mode */
+body.placing .maplibregl-canvas { cursor: crosshair; }
+.btn.armed {
+  background: linear-gradient(135deg, rgba(230,126,34,.28), rgba(230,126,34,.08));
+  border-color: var(--accent); color: #ffb066;
+}
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; }
 .row label { font-size: 13px; color: var(--text); cursor: pointer; }
@@ -272,6 +313,39 @@ input[type=range]::-moz-range-thumb {
   </div>
 
   <div class="grp">
+    <h3>Place a cylinder</h3>
+    <div class="pair">
+      <label>Diameter
+        <input type="number" id="cyl-d" value="40" min="0.5" max="20000" step="1"/>
+      </label>
+      <label id="cyl-h-label">Height
+        <input type="number" id="cyl-h" value="80" min="0.5" max="20000" step="1"/>
+      </label>
+    </div>
+    <select id="cyl-orient" style="margin-top:8px" aria-label="Orientation">
+      <option value="vertical">Vertical — standing up</option>
+      <option value="horizontal">Horizontal — lying down</option>
+    </select>
+    <div id="cyl-heading-wrap" hidden>
+      <div class="row" style="padding-bottom:0">
+        <label for="cyl-heading">Axis heading</label>
+        <span class="val" id="cyl-heading-val">0°</span>
+      </div>
+      <input type="range" id="cyl-heading" min="0" max="359" step="1" value="0"/>
+    </div>
+    <div class="row">
+      <label for="cyl-color">Colour</label>
+      <input type="color" id="cyl-color" value="#d4af37"/>
+    </div>
+    <button class="btn primary" id="cyl-place">◎ Click to place — off</button>
+    <div id="cyl-list"></div>
+    <div class="btn-2" id="cyl-actions" hidden>
+      <button class="btn" id="cyl-undo">↶ Undo</button>
+      <button class="btn" id="cyl-clear">✕ Clear all</button>
+    </div>
+  </div>
+
+  <div class="grp">
     <h3>Camera</h3>
     <div class="btn-2">
       <button class="btn primary" id="descend">▼ Descend</button>
@@ -294,7 +368,8 @@ input[type=range]::-moz-range-thumb {
     <p class="hint">
       <b>Drag</b> pan · <b>Scroll</b> zoom · <b>Right-drag</b> rotate &amp; tilt<br/>
       <b>Ctrl+drag</b> tilt · <b>Shift+drag</b> box zoom<br/>
-      Touch: <b>one finger</b> pan · <b>pinch</b> zoom &amp; twist · <b>two-finger drag</b> tilt
+      Touch: <b>one finger</b> pan · <b>pinch</b> zoom &amp; twist · <b>two-finger drag</b> tilt<br/>
+      <b>Esc</b> leaves place mode · <b>D</b> descend · <b>O</b> orbit · <b>S</b> spin
     </p>
   </div>
 </div>
@@ -615,12 +690,14 @@ input[type=range]::-moz-range-thumb {
     terrainOn = e.target.checked;
     applyTerrain();
     updateVoid();
+    map.triggerRepaint();
     if (!terrainOn && map.getPitch() > 60) map.easeTo({ pitch: 45, duration: 600 });
   });
   $('exag').addEventListener('input', function (e) {
     exaggeration = parseFloat(e.target.value);
     $('exag-val').textContent = exaggeration.toFixed(1) + '×';
     if (terrainOn) applyTerrain();
+    map.triggerRepaint();
   });
 
   /* ── Atmosphere ─────────────────────────────────────────── */
@@ -687,6 +764,374 @@ input[type=range]::-moz-range-thumb {
   map.on('mousedown', stopSpin);
   map.on('touchstart', stopSpin);
   map.on('wheel', stopSpin);
+
+  /* ────────────────────────────────────────────────────────────
+     Cylinders
+
+     Drawn by a custom WebGL layer rather than fill-extrusion, because
+     extrusions can only stand up: a lying-down cylinder needs a real
+     mesh. Everything lives in MapLibre's mercator space, where x runs
+     east, y runs south and z runs up, one unit being the whole world.
+     ──────────────────────────────────────────────────────────── */
+
+  var objects = [];          /* {lng, lat, ground, d, h, orient, heading, color} */
+  var placing = false;
+  var STORE_KEY = 'netherlayer.globe.cylinders';
+
+  /* ── 4×4 column-major matrix helpers ── */
+  function m4mul(a, b) {
+    var o = new Float64Array(16);
+    for (var c = 0; c < 4; c++) {
+      for (var r = 0; r < 4; r++) {
+        o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] +
+                       a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+      }
+    }
+    return o;
+  }
+  function m4translate(x, y, z) {
+    return new Float64Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+  }
+  function m4scale(x, y, z) {
+    return new Float64Array([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]);
+  }
+  function m4rotX(a) {
+    var c = Math.cos(a), s = Math.sin(a);
+    return new Float64Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+  }
+  function m4rotZ(a) {
+    var c = Math.cos(a), s = Math.sin(a);
+    return new Float64Array([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);
+  }
+  function m3from4(m) {
+    return new Float32Array([m[0],m[1],m[2], m[4],m[5],m[6], m[8],m[9],m[10]]);
+  }
+
+  /* Unit cylinder: diameter 1, length 1, axis along +z, centred on the origin. */
+  function cylinderMesh(segments) {
+    var pos = [], nrm = [], r = 0.5, hz = 0.5;
+    function v(x, y, z, nx, ny, nz) { pos.push(x, y, z); nrm.push(nx, ny, nz); }
+    for (var i = 0; i < segments; i++) {
+      var a0 = i / segments * 2 * Math.PI, a1 = (i + 1) / segments * 2 * Math.PI;
+      var c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+      var x0 = r * c0, y0 = r * s0, x1 = r * c1, y1 = r * s1;
+      /* wall */
+      v(x0, y0, -hz, c0, s0, 0); v(x1, y1, -hz, c1, s1, 0); v(x1, y1, hz, c1, s1, 0);
+      v(x0, y0, -hz, c0, s0, 0); v(x1, y1, hz, c1, s1, 0); v(x0, y0, hz, c0, s0, 0);
+      /* caps */
+      v(0, 0, hz, 0, 0, 1); v(x0, y0, hz, 0, 0, 1); v(x1, y1, hz, 0, 0, 1);
+      v(0, 0, -hz, 0, 0, -1); v(x1, y1, -hz, 0, 0, -1); v(x0, y0, -hz, 0, 0, -1);
+    }
+    return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), count: pos.length / 3 };
+  }
+
+  /* MapLibre blends between the globe and mercator projections as you zoom,
+     so an object has to be projected through both and mixed the same way its
+     terrain is — otherwise it would slide across the ground mid-transition. */
+  var VERT = [
+    'attribute vec3 a_pos;',
+    'attribute vec3 a_normal;',
+    'uniform mat4 u_globe;',
+    'uniform mat4 u_globe_model;',
+    'uniform mat4 u_mercator;',
+    'uniform vec4 u_globe_clip;',
+    'uniform float u_transition;',
+    'uniform mat3 u_normal;',
+    'varying vec3 v_normal;',
+    'void main() {',
+    '  v_normal = u_normal * a_normal;',
+    '  vec4 onGlobe = u_globe * vec4(a_pos, 1.0);',
+    /* On the sphere the map does not write real depth: it writes distance
+       from a clipping plane, which both orders the geometry and drops the
+       far side of the world. Match it, or this sits behind everything. */
+    '  vec3 spherePos = (u_globe_model * vec4(a_pos, 1.0)).xyz;',
+    '  onGlobe.z = (1.0 - (dot(spherePos, u_globe_clip.xyz) + u_globe_clip.w)) * onGlobe.w;',
+    '  vec4 onPlane = u_mercator * vec4(a_pos, 1.0);',
+    '  gl_Position = mix(onPlane, onGlobe, u_transition);',
+    '}'
+  ].join('\n');
+
+  var FRAG = [
+    'precision mediump float;',
+    'uniform vec3 u_color;',
+    'varying vec3 v_normal;',
+    'void main() {',
+    '  vec3 n = normalize(v_normal);',
+    '  if (!gl_FrontFacing) n = -n;',
+    '  vec3 sun = normalize(vec3(-0.45, -0.55, 0.70));',
+    '  float lam = max(dot(n, sun), 0.0);',
+    '  vec3 c = u_color * (0.42 + 0.72 * lam);',
+    '  float up = max(n.z, 0.0);',           /* a little sky light on the top */
+    '  c += vec3(0.55, 0.62, 0.78) * pow(up, 3.0) * 0.14;',
+    '  gl_FragColor = vec4(c, 1.0);',
+    '}'
+  ].join('\n');
+
+  var cylGL = null;
+
+  var cylinderLayer = {
+    id: 'cylinders',
+    type: 'custom',
+    renderingMode: '3d',
+
+    onAdd: function (_map, gl) {
+      function shader(type, src) {
+        var s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+          throw new Error(gl.getShaderInfoLog(s));
+        }
+        return s;
+      }
+      var prog = gl.createProgram();
+      gl.attachShader(prog, shader(gl.VERTEX_SHADER, VERT));
+      gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FRAG));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(prog));
+      }
+
+      var mesh = cylinderMesh(56);
+      function buffer(data) {
+        var b = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, b);
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        return b;
+      }
+      cylGL = {
+        prog: prog,
+        posBuf: buffer(mesh.pos),
+        nrmBuf: buffer(mesh.nrm),
+        count: mesh.count,
+        aPos: gl.getAttribLocation(prog, 'a_pos'),
+        aNrm: gl.getAttribLocation(prog, 'a_normal'),
+        uGlobe: gl.getUniformLocation(prog, 'u_globe'),
+        uGlobeModel: gl.getUniformLocation(prog, 'u_globe_model'),
+        uGlobeClip: gl.getUniformLocation(prog, 'u_globe_clip'),
+        uMerc: gl.getUniformLocation(prog, 'u_mercator'),
+        uTrans: gl.getUniformLocation(prog, 'u_transition'),
+        uNrm: gl.getUniformLocation(prog, 'u_normal'),
+        uCol: gl.getUniformLocation(prog, 'u_color')
+      };
+    },
+
+    render: function (gl, args) {
+      if (!cylGL || !objects.length) return;
+      var pd = args && args.defaultProjectionData;
+      if (!pd || !pd.mainMatrix) return;
+
+      /* transition 1 = drawn as a sphere, 0 = drawn as a flat plane. */
+      var t = Math.min(1, Math.max(0, pd.projectionTransition || 0));
+      var globeMat = pd.mainMatrix;
+      var mercMat = t > 0 ? (pd.fallbackMatrix || pd.mainMatrix) : pd.mainMatrix;
+
+      gl.useProgram(cylGL.prog);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.disable(gl.CULL_FACE);
+      gl.uniform1f(cylGL.uTrans, t);
+      var plane = pd.clippingPlane || [0, 0, 0, 0];
+      gl.uniform4f(cylGL.uGlobeClip, plane[0], plane[1], plane[2], plane[3]);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, cylGL.posBuf);
+      gl.enableVertexAttribArray(cylGL.aPos);
+      gl.vertexAttribPointer(cylGL.aPos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, cylGL.nrmBuf);
+      gl.enableVertexAttribArray(cylGL.aNrm);
+      gl.vertexAttribPointer(cylGL.aNrm, 3, gl.FLOAT, false, 0, 0);
+
+      for (var i = 0; i < objects.length; i++) {
+        var o = objects[i];
+        var lying = o.orient === 'horizontal';
+
+        /* Terrain is drawn at the exaggerated height, so the object has
+           to follow it up or its base would float or sink. The cylinder
+           itself always keeps its true size. */
+        var surface = o.ground * (terrainOn ? exaggeration : 0);
+        var axisUp = lying ? o.d / 2 : o.h / 2;
+        var altitude = surface + axisUp;
+        var lngLat = { lng: o.lng, lat: o.lat };
+
+        /* Local +z is the cylinder's axis. Tipping it 90° about x points
+           the axis north, then the heading spins it around. */
+        var rot = m4rotZ(lying ? o.heading * Math.PI / 180 : 0);
+        if (lying) rot = m4mul(rot, m4rotX(Math.PI / 2));
+        var shape = m4mul(rot, m4scale(o.d, o.d, o.h));
+
+        var mc = maplibregl.MercatorCoordinate.fromLngLat(lngLat, altitude);
+        var metre = mc.meterInMercatorCoordinateUnits();
+        var mercModel = m4mul(
+          m4mul(m4translate(mc.x, mc.y, mc.z), m4scale(metre, metre, metre)),
+          shape
+        );
+
+        var globeModel = m4mul(globeFrame(o.lng, o.lat, altitude), shape);
+        gl.uniformMatrix4fv(cylGL.uMerc, false, new Float32Array(m4mul(mercMat, mercModel)));
+        gl.uniformMatrix4fv(cylGL.uGlobe, false, new Float32Array(m4mul(globeMat, globeModel)));
+        gl.uniformMatrix4fv(cylGL.uGlobeModel, false, new Float32Array(globeModel));
+        gl.uniformMatrix3fv(cylGL.uNrm, false, m3from4(rot));
+        gl.uniform3fv(cylGL.uCol, hexToRgb(o.color));
+        gl.drawArrays(gl.TRIANGLES, 0, cylGL.count);
+      }
+    }
+  };
+
+  /* Metres → MapLibre's globe space, an earth-radius sphere with the poles
+     on ±y, matching the projectToSphere() the map's own shaders use. The
+     columns are the local east / south / up axes, one metre long each. */
+  var GLOBE_RADIUS = 6371008.8;
+  function globeFrame(lng, lat, altitude) {
+    var lam = lng * Math.PI / 180, phi = lat * Math.PI / 180;
+    var sl = Math.sin(lam), cl = Math.cos(lam), sp = Math.sin(phi), cp = Math.cos(phi);
+    var up = [sl * cp, sp, cl * cp];
+    var north = [-sl * sp, cp, -cl * sp];
+    var s = 1 / GLOBE_RADIUS;
+    var r = 1 + altitude / GLOBE_RADIUS;
+    return new Float64Array([
+      cl * s,        0,         -sl * s,       0,   /* east  */
+      -north[0] * s, -north[1] * s, -north[2] * s, 0,   /* south */
+      up[0] * s,     up[1] * s, up[2] * s,     0,   /* up    */
+      up[0] * r,     up[1] * r, up[2] * r,     1
+    ]);
+  }
+
+  function hexToRgb(hex) {
+    var n = parseInt(hex.slice(1), 16);
+    return new Float32Array([(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]);
+  }
+
+  /* ── Placement ── */
+  function currentSpec() {
+    var d = Math.max(0.5, parseFloat($('cyl-d').value) || 40);
+    var h = Math.max(0.5, parseFloat($('cyl-h').value) || 80);
+    return {
+      d: d, h: h,
+      orient: $('cyl-orient').value,
+      heading: parseFloat($('cyl-heading').value) || 0,
+      color: $('cyl-color').value
+    };
+  }
+
+  function setPlacing(on) {
+    placing = on;
+    document.body.classList.toggle('placing', on);
+    $('cyl-place').classList.toggle('armed', on);
+    $('cyl-place').textContent = on ? '◎ Click the terrain to place' : '◎ Click to place — off';
+  }
+
+  function addObject(lngLat) {
+    var spec = currentSpec();
+    var raw = terrainOn && map.queryTerrainElevation ? map.queryTerrainElevation(lngLat) : 0;
+    var ground = (raw === null || raw === undefined || !isFinite(raw))
+      ? 0 : raw / (exaggeration || 1);
+
+    objects.push({
+      lng: lngLat.lng, lat: lngLat.lat, ground: ground,
+      d: spec.d, h: spec.h, orient: spec.orient,
+      heading: spec.orient === 'horizontal' ? spec.heading : 0,
+      color: spec.color
+    });
+    saveObjects();
+    renderObjectList();
+    map.triggerRepaint();
+    toast(spec.d + ' × ' + spec.h + ' m ' + spec.orient + ' cylinder at ' +
+          fmtLat(lngLat.lat) + ' ' + fmtLon(lngLat.lng) + ', ground ' + fmtDist(ground));
+  }
+
+  function renderObjectList() {
+    var list = $('cyl-list');
+    list.innerHTML = '';
+    objects.forEach(function (o, i) {
+      var row = document.createElement('div');
+      row.className = 'obj';
+      row.title = 'Fly to this cylinder';
+
+      var sw = document.createElement('span');
+      sw.className = 'swatch';
+      sw.style.background = o.color;
+
+      var txt = document.createElement('span');
+      txt.className = 't';
+      txt.textContent = (o.orient === 'horizontal' ? '↔' : '↕') + ' ' +
+        o.d + ' × ' + o.h + ' m · ' + fmtDist(o.ground);
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '✕';
+      del.title = 'Remove';
+      del.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        objects.splice(i, 1);
+        saveObjects();
+        renderObjectList();
+        map.triggerRepaint();
+      });
+
+      row.addEventListener('click', function () {
+        stopSpin();
+        map.flyTo({
+          center: [o.lng, o.lat],
+          zoom: Math.max(map.getZoom(), 15.5),
+          pitch: 70, duration: 2500, freezeElevation: true, essential: true
+        });
+      });
+
+      row.appendChild(sw); row.appendChild(txt); row.appendChild(del);
+      list.appendChild(row);
+    });
+    $('cyl-actions').hidden = objects.length === 0;
+  }
+
+  function saveObjects() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(objects)); } catch (e) { /* private mode */ }
+  }
+  function loadObjects() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      var saved = JSON.parse(raw);
+      if (Array.isArray(saved)) {
+        objects = saved.filter(function (o) {
+          return o && isFinite(o.lng) && isFinite(o.lat) && isFinite(o.d) && isFinite(o.h);
+        });
+      }
+    } catch (e) { /* ignore anything unreadable */ }
+  }
+
+  $('cyl-place').addEventListener('click', function () { setPlacing(!placing); });
+  $('cyl-undo').addEventListener('click', function () {
+    objects.pop(); saveObjects(); renderObjectList(); map.triggerRepaint();
+  });
+  $('cyl-clear').addEventListener('click', function () {
+    objects = []; saveObjects(); renderObjectList(); map.triggerRepaint();
+  });
+  $('cyl-orient').addEventListener('change', function (e) {
+    var lying = e.target.value === 'horizontal';
+    $('cyl-heading-wrap').hidden = !lying;
+    $('cyl-h-label').firstChild.nodeValue = lying ? 'Length' : 'Height';
+    if (lying) {
+      /* Default to lying across the view, which is what you can see. */
+      var b = Math.round((map.getBearing() + 360) % 360);
+      $('cyl-heading').value = b;
+      $('cyl-heading-val').textContent = b + '°';
+    }
+  });
+  $('cyl-heading').addEventListener('input', function (e) {
+    $('cyl-heading-val').textContent = e.target.value + '°';
+  });
+
+  map.on('click', function (e) {
+    if (!placing) return;
+    addObject(e.lngLat);
+  });
+
+  /* Escape leaves placing mode. */
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && placing) setPlacing(false);
+  });
 
   /* ── Places ─────────────────────────────────────────────── */
   var PLACES = [
@@ -794,6 +1239,9 @@ input[type=range]::-moz-range-thumb {
     applyTerrain();
     updateHud();
     updateVoid();
+    map.addLayer(cylinderLayer);
+    loadObjects();
+    renderObjectList();
     autoCollapse();
     $('loader').classList.add('gone');
     setTimeout(function () { $('loader').style.display = 'none'; }, 800);
