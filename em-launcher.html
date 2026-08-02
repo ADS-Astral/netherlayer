@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Electromagnetic Launcher Simulator</title>
+<style>
+/* ─── Design tokens (shared with Netherlayer) ─── */
+:root {
+  --bg:       #0e0e1c;
+  --surface:  #0e0e1c;
+  --raised:   #13132a;
+  --sh-dark:  #07070f;
+  --sh-light: #191933;
+  --gold:     #d4af37;
+  --gold2:    #f0c040;
+  --gold3:    #7a5c00;
+  --text:     #d8d8f0;
+  --muted:    #7070a0;
+  --green:    #2ecc71;
+  --red:      #e74c3c;
+  --radius:   16px;
+  --gap:      clamp(16px, 3vw, 32px);
+  --grid:     #1c1c34;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.6; padding: var(--gap); display: flex; justify-content: center;
+}
+.wrap { width: 100%; max-width: 840px; }
+
+.nm-raised {
+  background: var(--surface);
+  box-shadow: 8px 8px 20px var(--sh-dark), -8px -8px 20px var(--sh-light);
+  border-radius: var(--radius);
+}
+
+header { text-align: center; margin-bottom: var(--gap); }
+h1 { font-size: clamp(1.5rem, 4vw, 2.2rem); color: var(--gold); letter-spacing: .02em; }
+header p { color: var(--muted); font-size: .95rem; }
+.chain {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 10px;
+  margin-top: 12px; font-size: .78rem; color: var(--muted);
+}
+.chain span { white-space: nowrap; }
+.chain b { color: var(--gold2); font-weight: 600; }
+
+.panel { padding: var(--gap); margin-bottom: var(--gap); }
+.panel > .caption { margin-bottom: 16px; display: block; }
+.field { margin-bottom: 20px; }
+.field:last-child { margin-bottom: 0; }
+label {
+  display: block; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin-bottom: 8px;
+}
+.sym { text-transform: none; }
+.row { display: flex; gap: 10px; }
+.row > input { flex: 1 1 auto; min-width: 0; }
+.row > select { flex: 0 0 clamp(84px, 24%, 120px); }
+.row > .unit-tag {
+  flex: 0 0 clamp(84px, 24%, 120px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .88rem; color: var(--muted); border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+}
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; }
+
+input, select {
+  width: 100%; padding: 12px 14px; font: inherit; font-size: 1rem;
+  color: var(--text); background: var(--surface); border: none; border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+  outline: none; appearance: none;
+}
+input:focus, select:focus { box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light), 0 0 0 2px var(--gold3); }
+input.invalid { color: var(--red); }
+select {
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 34px;
+}
+select option { background: var(--raised); color: var(--text); }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+.hint { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+
+/* ─── Verdict ─── */
+.verdict { padding: var(--gap); text-align: center; margin-bottom: var(--gap); }
+.verdict .flag {
+  font-size: clamp(1.4rem, 5.5vw, 2.2rem); font-weight: 700; letter-spacing: .01em;
+}
+.verdict .flag.yes { color: var(--green); }
+.verdict .flag.no { color: var(--red); }
+.verdict .why { color: var(--text); font-size: 1rem; margin-top: 8px; }
+.verdict .err { color: var(--red); font-size: 1rem; display: block; }
+
+.caption { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px; margin-top: 8px; text-align: left;
+}
+.stats div > span { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.stats div b { font-weight: 600; font-variant-numeric: tabular-nums; font-size: .95rem; }
+.split { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--sh-light); }
+.note {
+  color: var(--gold2); font-size: .86rem; display: block; margin-top: 14px;
+  text-align: left; padding: 10px 14px; border-left: 2px solid var(--gold3);
+}
+
+/* ─── Charts ─── */
+.chart-wrap { position: relative; margin-top: 8px; }
+svg.chart { width: 100%; height: auto; aspect-ratio: 760 / 300; display: block; overflow: visible; }
+svg.chart .grid-line { stroke: var(--grid); stroke-width: 1; }
+svg.chart .axis-line { stroke: var(--sh-light); stroke-width: 1; }
+svg.chart .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+svg.chart .axis-title { fill: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+svg.chart .series { fill: none; stroke: var(--gold); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg.chart .target { stroke: var(--green); stroke-width: 1.5; }
+svg.chart .target-label { fill: var(--green); font-size: 11px; }
+
+table.data { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: .86rem; }
+table.data th {
+  text-align: right; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); font-weight: 600; padding: 6px 8px;
+}
+table.data th:first-child, table.data td:first-child { text-align: left; }
+table.data td { padding: 6px 8px; border-top: 1px solid var(--sh-light); font-variant-numeric: tabular-nums; text-align: right; }
+table.data tr.total td { border-top: 2px solid var(--sh-light); color: var(--gold2); font-weight: 600; }
+.scroll-x { overflow-x: auto; }
+
+footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: var(--gap); }
+footer p { margin-bottom: 6px; }
+footer a { color: var(--gold); text-decoration: none; }
+footer a:hover { color: var(--gold2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Electromagnetic Launcher</h1>
+    <p>A capacitor bank, a pair of rails, and a payload — does it make orbit?</p>
+    <div class="chain">
+      <span><b>Bank</b> ½CV²</span><span>→</span>
+      <span><b>Circuit</b> RLC with moving armature</span><span>→</span>
+      <span><b>Rails</b> ½L′I²</span><span>→</span>
+      <span><b>Muzzle</b> v</span><span>→</span>
+      <span><b>Ascent</b> through the air</span>
+    </div>
+  </header>
+
+  <section class="panel nm-raised">
+    <span class="caption">Payload</span>
+    <div class="grid2">
+      <div class="field">
+        <label for="mPay">Payload mass</label>
+        <div class="row">
+          <input type="number" id="mPay" value="100" min="0" step="any" inputmode="decimal"/>
+          <select id="mPayUnit">
+            <option value="1" selected>kg</option>
+            <option value="1000">tonne</option>
+            <option value="0.001">g</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="mSabot">Armature and sabot mass</label>
+        <div class="row">
+          <input type="number" id="mSabot" value="20" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">kg</div>
+        </div>
+        <p class="hint">Accelerated with the payload, dropped at the muzzle.</p>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="dPay">Payload diameter</label>
+        <div class="row">
+          <input type="number" id="dPay" value="0.3" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m</div>
+        </div>
+        <p class="hint" id="dPayHint">&nbsp;</p>
+      </div>
+      <div class="field">
+        <label for="shape">Shape</label>
+        <select id="shape"><!-- populated by script --></select>
+        <p class="hint" id="shapeHint">&nbsp;</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <span class="caption">Destination</span>
+    <div class="grid2">
+      <div class="field">
+        <label for="dest">Target</label>
+        <select id="dest"><!-- populated by script --></select>
+      </div>
+      <div class="field">
+        <label for="alt">Altitude</label>
+        <div class="row">
+          <input type="number" id="alt" value="200" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">km</div>
+        </div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="angle">Launch angle above horizontal</label>
+        <div class="row">
+          <input type="number" id="angle" value="30" min="1" max="89" step="any" inputmode="decimal"/>
+          <div class="unit-tag">°</div>
+        </div>
+      </div>
+      <div class="field">
+        <label for="lat">Launch latitude</label>
+        <div class="row">
+          <input type="number" id="lat" value="0" min="0" max="90" step="any" inputmode="decimal"/>
+          <div class="unit-tag">°</div>
+        </div>
+        <p class="hint" id="latHint">&nbsp;</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <span class="caption">Launcher</span>
+    <div class="grid2">
+      <div class="field">
+        <label for="rail">Rail length</label>
+        <div class="row">
+          <input type="number" id="rail" value="1000" min="0" step="any" inputmode="decimal"/>
+          <select id="railUnit">
+            <option value="1" selected>m</option>
+            <option value="1000">km</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="site">Breech altitude</label>
+        <div class="row">
+          <input type="number" id="site" value="0" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m</div>
+        </div>
+        <p class="hint" id="siteHint">&nbsp;</p>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="gap">Rail spacing (bore)</label>
+        <div class="row">
+          <input type="number" id="gap" value="0.5" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m</div>
+        </div>
+        <p class="hint" id="gapHint">&nbsp;</p>
+      </div>
+      <div class="field">
+        <label for="railH">Rail height</label>
+        <div class="row">
+          <input type="number" id="railH" value="0.5" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <span class="caption">Power</span>
+    <div class="field">
+      <label for="capType">Capacitor technology</label>
+      <select id="capType"><!-- populated by script --></select>
+      <p class="hint" id="capHint">&nbsp;</p>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="cap">Bank capacitance</label>
+        <div class="row">
+          <input type="number" id="cap" value="20" min="0" step="any" inputmode="decimal"/>
+          <select id="capUnit">
+            <option value="1e-6">µF</option>
+            <option value="1e-3">mF</option>
+            <option value="1" selected>F</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="volt">Charge voltage</label>
+        <div class="row">
+          <input type="number" id="volt" value="30" min="0" step="any" inputmode="decimal"/>
+          <select id="voltUnit">
+            <option value="1">V</option>
+            <option value="1000" selected>kV</option>
+            <option value="1000000">MV</option>
+          </select>
+        </div>
+        <p class="hint" id="bankHint">&nbsp;</p>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="res">Circuit resistance</label>
+        <div class="row">
+          <input type="number" id="res" value="100" min="0" step="any" inputmode="decimal"/>
+          <select id="resUnit">
+            <option value="1e-6" selected>µΩ</option>
+            <option value="1e-3">mΩ</option>
+            <option value="1">Ω</option>
+          </select>
+        </div>
+        <p class="hint">Everything in the loop — bank ESR, bus, rails, armature contact.</p>
+      </div>
+      <div class="field">
+        <label for="ind">Fixed circuit inductance</label>
+        <div class="row">
+          <input type="number" id="ind" value="500" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">µH</div>
+        </div>
+        <p class="hint">The bus, the bank, and any pulse-shaping inductor. Raising it lowers the peak current and softens the shot.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="verdict nm-raised">
+    <div class="flag" id="flag">—</div>
+    <div class="why" id="why">&nbsp;</div>
+    <div id="err"></div>
+  </section>
+
+  <section class="panel nm-raised">
+    <span class="caption">In the rails</span>
+    <div class="stats" id="railStats"></div>
+    <div class="split">
+      <span class="caption">Velocity along the rails</span>
+      <div class="chart-wrap"><svg class="chart" id="chartV" viewBox="0 0 760 300" role="img" aria-label="Velocity against distance along the rails"></svg></div>
+    </div>
+    <div class="split">
+      <span class="caption">Current through the bore</span>
+      <div class="chart-wrap"><svg class="chart" id="chartI" viewBox="0 0 760 300" role="img" aria-label="Current against distance along the rails"></svg></div>
+    </div>
+    <div id="railNote"></div>
+  </section>
+
+  <section class="panel nm-raised">
+    <span class="caption">After the muzzle</span>
+    <div class="stats" id="flyStats"></div>
+    <div class="split">
+      <span class="caption">Altitude against time</span>
+      <div class="chart-wrap"><svg class="chart" id="chartH" viewBox="0 0 760 300" role="img" aria-label="Altitude against time after launch"></svg></div>
+    </div>
+    <div id="flyNote"></div>
+  </section>
+
+  <section class="panel nm-raised">
+    <span class="caption">Where the energy goes</span>
+    <div class="scroll-x">
+      <table class="data">
+        <thead><tr><th>Stage</th><th>Energy</th><th>Share of bank</th></tr></thead>
+        <tbody id="energy"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p>The bank, the circuit, the rails and the flight are solved as one system. The
+       rails' inductance grows as the armature travels, which both pushes it and fights
+       the supply, so the current is not something you set — it is what the circuit does.</p>
+    <p>Ideal in the ways that flatter a launcher: no friction or ablation in the bore,
+       no rail erosion, a sabot that separates cleanly, and no allowance for the payload
+       surviving what it is put through. A ballistic shot also cannot close its own
+       orbit — reaching the altitude is not the same as staying there.</p>
+    <p><a href="index.html">← Netherlayer</a> · <a href="rail-force.html">Rail force</a> ·
+       <a href="cable-resistance.html">Conductors</a> · <a href="capacitor.html">Capacitance</a> ·
+       <a href="launch-energy.html">Launch energy</a></p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const MU0 = 4e-7 * Math.PI;
+  const G0 = 9.80665;
+  const GM = 3.986004418e14;
+  const R_E = 6371000;
+  const OMEGA = 7.2921159e-5;
+
+  /* 1976 US Standard Atmosphere as piecewise exponentials: [base km, ρ, scale km] */
+  const ATMO = [
+    [0, 1.225, 7.249], [25, 3.899e-2, 6.349], [30, 1.774e-2, 6.682], [40, 3.972e-3, 7.554],
+    [50, 1.057e-3, 8.382], [60, 3.206e-4, 7.714], [70, 8.770e-5, 6.549], [80, 1.905e-5, 5.799],
+    [90, 3.396e-6, 5.382], [100, 5.297e-7, 5.877], [110, 9.661e-8, 7.263], [120, 2.438e-8, 9.473],
+    [130, 8.484e-9, 12.636], [140, 3.845e-9, 16.149], [150, 2.070e-9, 22.523], [180, 5.464e-10, 29.740],
+    [200, 2.789e-10, 37.105], [250, 7.248e-11, 45.546], [300, 2.418e-11, 53.628], [350, 9.518e-12, 53.298],
+    [400, 3.725e-12, 58.515], [450, 1.585e-12, 60.828], [500, 6.967e-13, 63.822], [600, 1.454e-13, 71.835],
+    [700, 3.614e-14, 88.667], [800, 1.170e-14, 124.64], [900, 5.245e-15, 181.05], [1000, 3.019e-15, 268.00]
+  ];
+  function density(h) {
+    const km = h / 1000;
+    if (km < 0) return ATMO[0][1];
+    if (km > 1100) return 0;
+    let band = ATMO[0];
+    for (let i = 0; i < ATMO.length; i++) if (km >= ATMO[i][0]) band = ATMO[i];
+    return band[1] * Math.exp(-(km - band[0]) / band[2]);
+  }
+
+  const SHAPES = [
+    { name: 'Slender dart', cd: 0.10 },
+    { name: 'Ogive nose', cd: 0.15 },
+    { name: 'Cone', cd: 0.20 },
+    { name: 'Sphere', cd: 0.47 },
+    { name: 'Blunt cylinder', cd: 0.80 },
+    { name: 'Flat disc', cd: 1.15 }
+  ];
+
+  /* Energy density is what sets how big the bank physically is; the pulse note is
+     what decides whether that technology can deliver megamps at all. */
+  const CAPS = [
+    { name: 'Film — metallised polypropylene', jkg: 1500,
+      note: 'The pulsed-power workhorse. Low ESR, survives full discharge in milliseconds.' },
+    { name: 'Film — oil-impregnated paper', jkg: 900,
+      note: 'Older pulsed-power technology. Heavier, but tolerant of brutal duty.' },
+    { name: 'Aluminium electrolytic', jkg: 300,
+      note: 'Cheap and dense in farads, but ESR and inductance fight a fast discharge.' },
+    { name: 'Supercapacitor (EDLC)', jkg: 18000,
+      note: 'Superb energy density, hopeless pulse. Seconds, not milliseconds — it cannot deliver this current.' },
+    { name: 'Ceramic (class 2)', jkg: 100,
+      note: 'Fast and low-loss, but the energy density makes a bank enormous.' }
+  ];
+
+  const DESTS = [
+    { name: 'Custom altitude', alt: null },
+    { name: 'Kármán line — 100 km', alt: 100 },
+    { name: 'Very low LEO — 200 km', alt: 200 },
+    { name: 'LEO / ISS — 420 km', alt: 420 },
+    { name: 'Sun-synchronous — 800 km', alt: 800 }
+  ];
+
+  const $ = id => document.getElementById(id);
+  const els = {};
+  ['mPay','mPayUnit','mSabot','dPay','dPayHint','shape','shapeHint','dest','alt','angle','lat','latHint',
+   'rail','railUnit','site','siteHint','gap','gapHint','railH','capType','capHint','cap','capUnit',
+   'volt','voltUnit','bankHint','res','resUnit','ind','flag','why','err','railStats','chartV','chartI',
+   'railNote','flyStats','chartH','flyNote','energy'].forEach(id => {
+    els[id] = $(id);
+    if (!els[id]) throw new Error(`markup is missing #${id}`);
+  });
+
+  SHAPES.forEach((s, i) => els.shape.add(new Option(`${s.name} — C_d ${s.cd}`, String(i))));
+  CAPS.forEach((c, i) => els.capType.add(new Option(c.name, String(i))));
+  DESTS.forEach((d, i) => els.dest.add(new Option(d.name, String(i))));
+  els.shape.value = '0'; els.capType.value = '0'; els.dest.value = '2';
+
+  /* ─── Formatting ─── */
+  const sig = (x, n = 4) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return '0';
+    const s = x.toPrecision(n);
+    if (s.includes('e')) return Number(s).toString();
+    return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
+  };
+  const PRE = [[1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ']];
+  const eng = (x, unit) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return `0 ${unit}`;
+    const [sc, pre] = PRE.find(([s]) => Math.abs(x) >= s) || PRE[PRE.length - 1];
+    return `${sig(x / sc, 4)} ${pre}${unit}`;
+  };
+  const secs = t => t >= 1 ? `${sig(t, 4)} s` : t >= 1e-3 ? `${sig(t * 1e3, 4)} ms` : `${sig(t * 1e6, 4)} µs`;
+  const tonnes = kg => kg >= 1e6 ? `${sig(kg / 1e6, 4)} kt` : kg >= 1e3 ? `${sig(kg / 1e3, 4)} t` : `${sig(kg, 4)} kg`;
+  const km = m => m >= 1000 ? `${sig(m / 1000, 4)} km` : `${sig(m, 4)} m`;
+
+  const inductanceGradient = (gap, railH) => (MU0 / Math.PI) * Math.acosh(1 + gap / railH);
+
+  /* ─── Stage 1: the bank driving the rails ───────────────────────────────
+     Four coupled states. The capacitor drains into a loop whose inductance grows
+     as the armature travels, so the same L′ that produces the force also produces
+     a back-EMF L′·v·I that fights the supply. Current is therefore an outcome,
+     never an input — which is the whole difference between this and the standalone
+     rail calculator. */
+  function fireRails(p) {
+    let I = 0, Vc = p.v0, v = 0, x = 0, t = 0, eRes = 0;
+    const out = [{ x: 0, v: 0, I: 0, t: 0 }];
+    let peakI = 0, peakF = 0, steps = 0;
+
+    while (x < p.railLen && t < 10 && steps < 400000) {
+      const L = p.l0 + p.lp * x;
+      const dI = (Vc - I * p.r - p.lp * v * I) / L;
+      const F = 0.5 * p.lp * I * I;
+      const a = F / p.mass;
+
+      // Step small enough that neither the current nor the velocity moves far in one go.
+      let dt = 1e-4;
+      if (Math.abs(dI) > 0) dt = Math.min(dt, 0.01 * Math.max(Math.abs(I), 1e3) / Math.abs(dI));
+      if (a > 0) dt = Math.min(dt, 0.01 * Math.max(v, 1) / a);
+      dt = Math.max(dt, 1e-9);
+
+      eRes += I * I * p.r * dt;
+      I += dI * dt;
+      Vc -= I / p.cap * dt;
+      v += a * dt;
+      x += v * dt;
+      t += dt;
+      steps++;
+
+      /* Crowbar diode. Left alone an LC circuit rings and drives the bank
+         negative, which no real pulsed-power set allows: once the capacitor
+         reaches zero it is shorted out and the inductor's current freewheels
+         down through the resistance instead of reversing. */
+      if (Vc < 0) Vc = 0;
+      if (I < 0) I = 0;
+
+      if (I > peakI) peakI = I;
+      if (F > peakF) peakF = F;
+      if (I <= 0 && Vc <= 0) break;               // bank spent and current freewheeled away
+      if (out.length < 400 || x >= p.railLen) out.push({ x, v, I, t });
+      else if (steps % 40 === 0) out.push({ x, v, I, t });
+    }
+    const L = p.l0 + p.lp * Math.min(x, p.railLen);
+    return {
+      v, x, t, I, Vc, peakI, peakF, eRes, samples: out,
+      eMag: 0.5 * L * I * I, eKin: 0.5 * p.mass * v * v,
+      exited: x >= p.railLen
+    };
+  }
+
+  /* ─── Stage 2: the flight ───────────────────────────────────────────────
+     Unpowered coast in the inertial frame, Cartesian so the curvature is handled,
+     with drag against the air the projectile actually meets — the atmosphere turns
+     with the Earth, so it is the air-relative speed that matters. */
+  function fly(v0, angleDeg, siteAlt, targetAlt, cdAm, vRot) {
+    const th = angleDeg * Math.PI / 180;
+    let x = 0, y = R_E + siteAlt;
+    let vx = v0 * Math.cos(th) + vRot, vy = v0 * Math.sin(th);
+    let t = 0, apogee = siteAlt, maxQ = 0, maxG = 0;
+    const track = [{ t: 0, h: siteAlt }];
+    let reached = null;
+
+    while (t < 20000) {
+      const r = Math.hypot(x, y), alt = r - R_E;
+      if (alt > apogee) apogee = alt;
+      if (!reached && alt >= targetAlt) {
+        const vr = (x * vx + y * vy) / r, vt = Math.abs(x * vy - y * vx) / r;
+        reached = { speed: Math.hypot(vx, vy), vr, vt, t };
+      }
+      const vrad = (x * vx + y * vy) / r;
+      if ((vrad < 0 && alt < targetAlt) || alt < siteAlt - 1000) break;
+      if (reached && alt > targetAlt * 1.02) break;
+
+      const rho = density(alt);
+      const vAtm = vRot * r / R_E;
+      const wx = vx - vAtm * (y / r), wy = vy + vAtm * (x / r);
+      const w = Math.max(Math.hypot(wx, wy), 1e-6);
+      const q = 0.5 * rho * w * w;
+      const aDrag = q * cdAm;
+      if (q > maxQ) maxQ = q;
+      if (aDrag / G0 > maxG) maxG = aDrag / G0;
+
+      const g3 = GM / (r * r * r);
+      const ax = -g3 * x - aDrag * wx / w, ay = -g3 * y - aDrag * wy / w;
+      let dt = Math.min(alt > 150000 ? 2 : 0.2, 100 / Math.max(Math.hypot(vx, vy), 1));
+      const atot = Math.hypot(ax, ay);
+      if (atot > 0) dt = Math.min(dt, 0.01 * Math.hypot(vx, vy) / atot);
+      dt = Math.max(dt, 1e-4);
+
+      vx += ax * dt; vy += ay * dt; x += vx * dt; y += vy * dt; t += dt;
+      if (track.length < 400) track.push({ t, h: alt });
+      else if (track.length % 1 === 0 && t > track[track.length - 1].t * 1.02) track.push({ t, h: alt });
+    }
+    return { apogee, reached, maxQ, maxG, track, t };
+  }
+
+  /* ─── Charts ─── */
+  const CW = 760, CH = 300, CM = { t: 12, r: 18, b: 42, l: 74 };
+  const CPW = CW - CM.l - CM.r, CPH = CH - CM.t - CM.b;
+
+  function niceMax(v) {
+    if (v <= 0) return 1;
+    const e = Math.pow(10, Math.floor(Math.log10(v))), f = v / e;
+    return (f <= 1 ? 1 : f <= 1.5 ? 1.5 : f <= 2 ? 2 : f <= 2.5 ? 2.5
+      : f <= 3 ? 3 : f <= 4 ? 4 : f <= 5 ? 5 : f <= 8 ? 8 : 10) * e;
+  }
+
+  function lineChart(svg, pts, xLabel, yLabel, fmtX, fmtY, target) {
+    if (!pts.length) { svg.innerHTML = ''; return; }
+    const xMax = Math.max(...pts.map(p => p.x)) || 1;
+    const yMax = niceMax(Math.max(Math.max(...pts.map(p => p.y)), target || 0) * 1.05);
+    const X = v => CM.l + (v / xMax) * CPW;
+    const Y = v => CM.t + CPH - (v / yMax) * CPH;
+    const parts = [];
+    for (let i = 0; i <= 4; i++) {
+      const yv = yMax * i / 4, py = Y(yv);
+      parts.push(`<line class="grid-line" x1="${CM.l}" y1="${py}" x2="${CM.l + CPW}" y2="${py}"/>`);
+      parts.push(`<text class="tick" x="${CM.l - 10}" y="${py + 4}" text-anchor="end">${fmtY(yv)}</text>`);
+    }
+    for (let i = 0; i <= 4; i++) {
+      const xv = xMax * i / 4, px = X(xv);
+      parts.push(`<line class="grid-line" x1="${px}" y1="${CM.t}" x2="${px}" y2="${CM.t + CPH}"/>`);
+      parts.push(`<text class="tick" x="${px}" y="${CM.t + CPH + 18}" text-anchor="middle">${fmtX(xv)}</text>`);
+    }
+    parts.push(`<line class="axis-line" x1="${CM.l}" y1="${CM.t + CPH}" x2="${CM.l + CPW}" y2="${CM.t + CPH}"/>`);
+    parts.push(`<line class="axis-line" x1="${CM.l}" y1="${CM.t}" x2="${CM.l}" y2="${CM.t + CPH}"/>`);
+    parts.push(`<text class="axis-title" x="${CM.l + CPW / 2}" y="${CH - 6}" text-anchor="middle">${xLabel}</text>`);
+    parts.push(`<text class="axis-title" transform="translate(16 ${CM.t + CPH / 2}) rotate(-90)" text-anchor="middle">${yLabel}</text>`);
+    if (target) {
+      parts.push(`<line class="target" x1="${CM.l}" y1="${Y(target)}" x2="${CM.l + CPW}" y2="${Y(target)}"/>`);
+      parts.push(`<text class="target-label" x="${CM.l + CPW - 4}" y="${Y(target) - 6}" text-anchor="end">target</text>`);
+    }
+    parts.push(`<polyline class="series" points="${pts.map(p => `${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}"/>`);
+    svg.innerHTML = parts.join('');
+  }
+
+  /* ─── Main ─── */
+  function readPositive(el, allowZero) {
+    const v = parseFloat(el.value);
+    const ok = isFinite(v) && (allowZero ? v >= 0 : v > 0);
+    el.classList.toggle('invalid', el.value !== '' && !ok);
+    return ok ? v : NaN;
+  }
+
+  function fail(msg) {
+    els.flag.textContent = '—'; els.flag.className = 'flag';
+    els.why.innerHTML = '&nbsp;';
+    els.err.innerHTML = `<span class="err">${msg}</span>`;
+    els.railStats.innerHTML = ''; els.flyStats.innerHTML = '';
+    els.chartV.innerHTML = ''; els.chartI.innerHTML = ''; els.chartH.innerHTML = '';
+    els.railNote.innerHTML = ''; els.flyNote.innerHTML = ''; els.energy.innerHTML = '';
+  }
+  const renderInto = (el, pairs) =>
+    el.innerHTML = pairs.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+
+  function update() {
+    const shape = SHAPES[Number(els.shape.value)];
+    const capT = CAPS[Number(els.capType.value)];
+    els.shapeHint.textContent = `Drag coefficient ${shape.cd}.`;
+    els.capHint.textContent = capT.note;
+
+    const mPay = readPositive(els.mPay) * parseFloat(els.mPayUnit.value);
+    const mSabot = readPositive(els.mSabot, true);
+    const dPay = readPositive(els.dPay);
+    const altKm = readPositive(els.alt);
+    const angle = readPositive(els.angle);
+    const lat = readPositive(els.lat, true);
+    const railLen = readPositive(els.rail) * parseFloat(els.railUnit.value);
+    const site = readPositive(els.site, true);
+    const gap = readPositive(els.gap);
+    const railH = readPositive(els.railH);
+    const cap = readPositive(els.cap) * parseFloat(els.capUnit.value);
+    const v0 = readPositive(els.volt) * parseFloat(els.voltUnit.value);
+    const r = readPositive(els.res, true);
+    const resistance = r * parseFloat(els.resUnit.value);
+    const l0 = readPositive(els.ind) * 1e-6;
+
+    if ([mPay, mSabot, dPay, altKm, angle, lat, railLen, site, gap, railH, cap, v0, r, l0].some(x => !isFinite(x))) {
+      return fail('Every field needs a number before this can be solved.');
+    }
+    if (angle >= 90) return fail('Launch angle must be under 90 degrees.');
+    if (dPay > gap) return fail(`A ${sig(dPay, 3)} m payload does not fit a ${sig(gap, 3)} m bore.`);
+    els.err.innerHTML = '';
+
+    const lp = inductanceGradient(gap, railH);
+    const bankE = 0.5 * cap * v0 * v0;
+    const mass = mPay + mSabot;
+    const area = Math.PI * dPay * dPay / 4;
+    const cdAm = shape.cd * area / mPay;      // sabot is gone by now
+    const vRot = OMEGA * R_E * Math.cos(lat * Math.PI / 180);
+    const muzzleAlt = site + railLen * Math.sin(angle * Math.PI / 180);
+    const targetAlt = altKm * 1000;
+
+    els.gapHint.textContent = `Inductance gradient ${sig(lp * 1e6, 3)} µH/m.`;
+    els.dPayHint.textContent = `${sig(area, 3)} m² frontal area — ballistic coefficient ${sig(mPay / (shape.cd * area), 4)} kg/m².`;
+    els.bankHint.textContent = `Bank holds ${eng(bankE, 'J')} — about ${tonnes(bankE / capT.jkg)} of capacitor.`;
+    els.latHint.textContent = `Ground moves ${sig(vRot, 4)} m/s eastward here.`;
+    els.siteHint.textContent = `Muzzle sits at ${km(muzzleAlt)} with this rail and angle.`;
+
+    if (muzzleAlt >= targetAlt) return fail('The muzzle is already at the target altitude.');
+
+    /* Stage 1 */
+    const shot = fireRails({ v0, cap, r: resistance, l0, lp, mass, railLen });
+    const gPeak = shot.peakF / mass / G0;
+
+    renderInto(els.railStats, [
+      ['Muzzle velocity', shot.exited ? `${sig(shot.v / 1000, 4)} km/s` : '—'],
+      ['Peak current', eng(shot.peakI, 'A')],
+      ['Peak force', eng(shot.peakF, 'N')],
+      ['Peak acceleration', `${sig(gPeak, 4)} g`],
+      ['Time in the rails', secs(shot.t)],
+      ['Bank voltage left', eng(Math.max(shot.Vc, 0), 'V')],
+      ['Inductance gradient', `${sig(lp * 1e6, 3)} µH/m`],
+      ['Accelerated mass', tonnes(mass)]
+    ]);
+
+    lineChart(els.chartV, shot.samples.map(s => ({ x: s.x, y: s.v / 1000 })),
+      'Distance along rails (m)', 'Velocity (km/s)', v => sig(v, 3), v => sig(v, 3));
+    lineChart(els.chartI, shot.samples.map(s => ({ x: s.x, y: s.I / 1e6 })),
+      'Distance along rails (m)', 'Current (MA)', v => sig(v, 3), v => sig(v, 3));
+
+    if (!shot.exited) {
+      els.flag.textContent = 'NO — it never leaves the rails';
+      els.flag.className = 'flag no';
+      els.why.textContent = `The bank ran down after ${km(shot.x)} of a ${km(railLen)} rail. ` +
+        'More capacitance, more voltage, or a shorter rail.';
+      els.flyStats.innerHTML = ''; els.chartH.innerHTML = ''; els.flyNote.innerHTML = '';
+      els.energy.innerHTML = '';
+      els.railNote.innerHTML = `<span class="note">Stalled at ${sig(shot.v / 1000, 3)} km/s.</span>`;
+      return;
+    }
+
+    /* Stage 2 */
+    const flight = fly(shot.v, angle, muzzleAlt, targetAlt, cdAm, vRot);
+    const rTarget = R_E + targetAlt;
+    const vCirc = Math.sqrt(GM / rTarget);
+
+    renderInto(els.flyStats, [
+      ['Apogee', km(flight.apogee)],
+      ['Speed at target', flight.reached ? `${sig(flight.reached.speed / 1000, 4)} km/s` : '—'],
+      ['Orbital speed needed', `${sig(vCirc / 1000, 4)} km/s`],
+      ['Peak dynamic pressure', `${sig(flight.maxQ / 1e6, 3)} MPa`],
+      ['Peak deceleration', `${sig(flight.maxG, 4)} g`],
+      ['Time to target', flight.reached ? secs(flight.reached.t) : '—']
+    ]);
+
+    lineChart(els.chartH, flight.track.map(s => ({ x: s.t, y: s.h / 1000 })),
+      'Time (s)', 'Altitude (km)', v => sig(v, 3), v => sig(v, 3), targetAlt / 1000);
+
+    /* Verdict */
+    if (!flight.reached) {
+      els.flag.textContent = 'NO — falls short';
+      els.flag.className = 'flag no';
+      els.why.innerHTML = `Apogee is <b>${km(flight.apogee)}</b> against a target of ` +
+        `<b>${km(targetAlt)}</b>. It leaves the muzzle at ${sig(shot.v / 1000, 4)} km/s and the ` +
+        'air takes the rest.';
+    } else {
+      const dvCirc = Math.hypot(flight.reached.vr, vCirc - flight.reached.vt);
+      els.flag.textContent = 'REACHES THE ALTITUDE';
+      els.flag.className = 'flag yes';
+      els.why.innerHTML = `Arrives at <b>${km(targetAlt)}</b> doing ` +
+        `<b>${sig(flight.reached.speed / 1000, 4)} km/s</b>. A circular orbit there needs ` +
+        `${sig(vCirc / 1000, 4)} km/s, and a kick stage must still supply ` +
+        `<b>${sig(dvCirc, 4)} m/s</b> — no ballistic shot can close its own orbit.`;
+      els.flyNote.innerHTML = `<span class="note">Reaching the altitude is not the same as ` +
+        `staying there. The trajectory's low point is still down at the muzzle, so without ` +
+        `that ${sig(dvCirc, 4)} m/s of circularisation the payload comes back.</span>`;
+    }
+
+    els.railNote.innerHTML = `<span class="note">The current is not something you chose — ` +
+      `it is what the circuit did. It peaked at ${eng(shot.peakI, 'A')} and the back-EMF ` +
+      `L′·v·I grew to ${eng(lp * shot.v * shot.I, 'V')} by the muzzle, fighting a bank that had ` +
+      `${eng(Math.max(shot.Vc, 0), 'V')} left. The payload took ${sig(gPeak, 4)} g at peak.</span>`;
+
+    /* Energy ledger */
+    const rows = [
+      ['Stored in the bank', bankE],
+      ['Lost to circuit resistance', shot.eRes],
+      ['Left in the magnetic field', shot.eMag],
+      ['Still in the bank at exit', Math.max(0.5 * cap * shot.Vc * shot.Vc, 0)],
+      ['Kinetic energy at the muzzle', shot.eKin],
+      ['Of which is payload', shot.eKin * mPay / mass]
+    ];
+    els.energy.innerHTML = rows.map(([k, e], i) =>
+      `<tr class="${i === 0 ? 'total' : ''}"><td>${k}</td><td>${eng(e, 'J')}</td>` +
+      `<td>${sig(100 * e / bankE, 3)} %</td></tr>`).join('');
+  }
+
+  els.dest.addEventListener('change', () => {
+    const d = DESTS[Number(els.dest.value)];
+    if (d.alt !== null) els.alt.value = String(d.alt);
+    update();
+  });
+  els.alt.addEventListener('input', () => { els.dest.value = '0'; update(); });
+  ['mPay','mPayUnit','mSabot','dPay','shape','angle','lat','rail','railUnit','site','gap','railH',
+   'capType','cap','capUnit','volt','voltUnit','res','resUnit','ind']
+    .forEach(id => els[id].addEventListener('input', update));
+  update();
+})();
+</script>
+</body>
+</html>
