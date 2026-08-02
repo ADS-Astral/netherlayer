@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Rail Force, Acceleration &amp; Exit Velocity</title>
+<style>
+/* ─── Design tokens (shared with Netherlayer) ─── */
+:root {
+  --bg:       #0e0e1c;
+  --surface:  #0e0e1c;
+  --raised:   #13132a;
+  --sh-dark:  #07070f;
+  --sh-light: #191933;
+  --gold:     #d4af37;
+  --gold2:    #f0c040;
+  --gold3:    #7a5c00;
+  --text:     #d8d8f0;
+  --muted:    #7070a0;
+  --green:    #2ecc71;
+  --red:      #e74c3c;
+  --radius:   16px;
+  --gap:      clamp(16px, 3vw, 32px);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.6; padding: var(--gap); display: flex; justify-content: center;
+}
+.wrap { width: 100%; max-width: 780px; }
+
+.nm-raised {
+  background: var(--surface);
+  box-shadow: 8px 8px 20px var(--sh-dark), -8px -8px 20px var(--sh-light);
+  border-radius: var(--radius);
+}
+.nm-inset {
+  background: var(--surface);
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+  border-radius: 12px;
+}
+
+header { text-align: center; margin-bottom: var(--gap); }
+h1 { font-size: clamp(1.5rem, 4vw, 2.2rem); color: var(--gold); letter-spacing: .02em; }
+header p { color: var(--muted); font-size: .95rem; }
+code.formula {
+  display: inline-block; margin-top: 10px; padding: 8px 16px;
+  color: var(--gold2); font-size: .95rem; letter-spacing: .03em;
+}
+
+.panel { padding: var(--gap); margin-bottom: var(--gap); }
+.field { margin-bottom: 20px; }
+.field:last-child { margin-bottom: 0; }
+label {
+  display: block; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin-bottom: 8px;
+}
+.sym { text-transform: none; }
+.row { display: flex; gap: 10px; }
+.row > input { flex: 1 1 auto; min-width: 0; }
+.row > select { flex: 0 0 clamp(84px, 24%, 120px); }
+.row > .unit-tag {
+  flex: 0 0 clamp(84px, 24%, 120px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .88rem; color: var(--muted); border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+}
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; }
+
+input, select {
+  width: 100%; padding: 12px 14px; font: inherit; font-size: 1rem;
+  color: var(--text); background: var(--surface); border: none; border-radius: 12px;
+  box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light);
+  outline: none; appearance: none;
+}
+input:focus, select:focus { box-shadow: inset 4px 4px 10px var(--sh-dark), inset -4px -4px 10px var(--sh-light), 0 0 0 2px var(--gold3); }
+input.invalid { color: var(--red); }
+select {
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 34px;
+}
+select option { background: var(--raised); color: var(--text); }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+.hint { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+
+/* ─── Results ─── */
+.result { padding: var(--gap); text-align: center; }
+.caption { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
+.primary {
+  font-size: clamp(1.8rem, 7vw, 2.8rem); color: var(--gold);
+  font-variant-numeric: tabular-nums; word-break: break-word;
+}
+.primary .unit { color: var(--muted); font-size: .45em; margin-left: .3em; }
+.secondary { margin-top: 4px; color: var(--green); font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.err { color: var(--red); font-size: 1rem; display: block; margin-top: 10px; }
+
+.pair {
+  margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--sh-light);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px;
+}
+.pair > div > span { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.pair > div > b {
+  display: block; font-size: clamp(1.2rem, 4.5vw, 1.7rem); color: var(--gold2);
+  font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.pair > div > em { display: block; font-style: normal; font-size: .8rem; color: var(--muted); }
+
+.split { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--sh-light); }
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 14px; text-align: left;
+}
+.stats div > span { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.stats div b { font-weight: 600; font-variant-numeric: tabular-nums; font-size: .95rem; }
+.note {
+  color: var(--gold2); font-size: .86rem; display: block; margin-top: 14px;
+  text-align: left; padding: 10px 14px; border-left: 2px solid var(--gold3);
+}
+
+footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: var(--gap); }
+footer p { margin-bottom: 6px; }
+footer a { color: var(--gold); text-decoration: none; }
+footer a:hover { color: var(--gold2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Rail Force &amp; Exit Velocity</h1>
+    <p>Current into force, force into acceleration, acceleration into how fast it leaves.</p>
+    <code class="formula nm-inset" id="formula">F = ½ · L′ · I²   →   a = F / m   →   v = √(u² + 2as)</code>
+  </header>
+
+  <section class="panel nm-raised">
+    <div class="grid2">
+      <div class="field">
+        <label for="len">Rail length</label>
+        <div class="row">
+          <input type="number" id="len" value="1000" min="0" step="any" inputmode="decimal"/>
+          <select id="lenUnit">
+            <option value="1" selected>m</option>
+            <option value="1000">km</option>
+            <option value="0.3048">ft</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="mass">Projectile mass</label>
+        <div class="row">
+          <input type="number" id="mass" value="1000" min="0" step="any" inputmode="decimal"/>
+          <select id="massUnit">
+            <option value="0.001">g</option>
+            <option value="1" selected>kg</option>
+            <option value="1000">tonne</option>
+            <option value="0.45359237">lb</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="cur">Current</label>
+        <div class="row">
+          <input type="number" id="cur" value="14" min="0" step="any" inputmode="decimal"/>
+          <select id="curUnit">
+            <option value="1">A</option>
+            <option value="1000">kA</option>
+            <option value="1000000" selected>MA</option>
+          </select>
+        </div>
+        <p class="hint">Held constant the whole way down the rails.</p>
+      </div>
+      <div class="field">
+        <label for="u0">Entry velocity</label>
+        <div class="row">
+          <input type="number" id="u0" value="0" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m/s</div>
+        </div>
+        <p class="hint">Anything an injector already gave it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <div class="field">
+      <label for="mode">Where the force comes from</label>
+      <select id="mode">
+        <option value="rail" selected>The rails’ own field — F = ½·L′·I²</option>
+        <option value="ext">An applied field — F = B·I·L</option>
+      </select>
+      <p class="hint" id="modeHint">&nbsp;</p>
+    </div>
+
+    <div class="grid2" id="railRow">
+      <div class="field">
+        <label for="gap">Rail spacing (bore)</label>
+        <div class="row">
+          <input type="number" id="gap" value="0.5" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m</div>
+        </div>
+        <p class="hint" id="gapHint">&nbsp;</p>
+      </div>
+      <div class="field">
+        <label for="railH">Rail height</label>
+        <div class="row">
+          <input type="number" id="railH" value="0.5" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" id="extRow" style="display:none">
+      <div class="field">
+        <label for="bField">Flux density <span class="sym">(B)</span></label>
+        <div class="row">
+          <input type="number" id="bField" value="10" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">T</div>
+        </div>
+        <p class="hint">Superconducting magnets reach 10–20 T; iron saturates near 2.</p>
+      </div>
+      <div class="field">
+        <label for="armL">Conductor length in the field</label>
+        <div class="row">
+          <input type="number" id="armL" value="0.5" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">m</div>
+        </div>
+        <p class="hint">The armature spanning the field — for rails, the spacing.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel result nm-raised">
+    <div class="caption">Exit velocity</div>
+    <div class="primary" id="outV">—</div>
+    <div class="secondary" id="outVsub">&nbsp;</div>
+    <div id="err"></div>
+
+    <div class="pair">
+      <div><span>Acceleration</span><b id="outA">—</b><em id="outAsub">&nbsp;</em></div>
+      <div><span>Force on the object</span><b id="outG">—</b><em id="outGsub">&nbsp;</em></div>
+    </div>
+
+    <div class="split">
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <div id="note"></div>
+  </section>
+
+  <footer>
+    <p>Constant current gives constant force, so the acceleration is uniform and
+       v = √(u² + 2as) holds exactly. A real pulse rises and falls, and the average
+       force over the run is what matters — put that average in and the answer stands.</p>
+    <p>Bare electrodynamics: no friction, no air in the bore, no ablation, and no
+       allowance for the armature’s own resistance. Every one of those takes velocity
+       off the exit figure.</p>
+    <p><a href="index.html">← Netherlayer</a> · <a href="cable-resistance.html">Conductors</a> · <a href="launch-energy.html">Launch energy</a></p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const MU0 = 4e-7 * Math.PI;     // H/m
+  const G0 = 9.80665;             // m/s²
+  const V_ORBIT = 7670;           // m/s, circular orbit at ISS altitude
+  const V_ESCAPE = 11186;         // m/s, from Earth's surface
+  const MACH1 = 343;              // m/s, sea level
+
+  const $ = id => document.getElementById(id);
+  const els = {};
+  ['len','lenUnit','mass','massUnit','cur','curUnit','u0','mode','modeHint','railRow','extRow',
+   'gap','gapHint','railH','bField','armL','formula','outV','outVsub','err','outA','outAsub',
+   'outG','outGsub','stats','note'].forEach(id => {
+    els[id] = $(id);
+    if (!els[id]) throw new Error(`markup is missing #${id}`);
+  });
+
+  /* ─── Formatting ─── */
+  const sig = (x, n = 4) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return '0';
+    const s = x.toPrecision(n);
+    if (s.includes('e')) return Number(s).toString();
+    return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
+  };
+  const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+  const sci = (x, n = 4) => {
+    if (!isFinite(x) || x === 0) return sig(x, n);
+    const e = Math.floor(Math.log10(Math.abs(x)));
+    if (e >= -3 && e <= 4) return sig(x, n);
+    return `${(x / Math.pow(10, e)).toPrecision(n)} × 10${String(e).split('').map(c => SUP[c]).join('')}`;
+  };
+  const PRE = [[1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm']];
+  const eng = (x, unit) => {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return `0 ${unit}`;
+    const [sc, pre] = PRE.find(([s]) => Math.abs(x) >= s) || PRE[PRE.length - 1];
+    return `${sig(x / sc, 4)} ${pre}${unit}`;
+  };
+  const tonnes = kg => kg >= 1e6 ? `${sig(kg / 1e6, 4)} kt` : kg >= 1e3 ? `${sig(kg / 1e3, 4)} t` : `${sig(kg, 4)} kg`;
+  const metres = m => m >= 1e3 ? `${sig(m / 1e3, 4)} km` : `${sig(m, 4)} m`;
+  const secs = t => t >= 1 ? `${sig(t, 4)} s` : t >= 1e-3 ? `${sig(t * 1e3, 4)} ms` : `${sig(t * 1e6, 4)} µs`;
+
+  /* ─── Physics ─────────────────────────────────────────────────────────────
+     A railgun pushes on its own field: the current loops out along one rail,
+     across the armature and back, and the field it makes acts on the armature.
+     That force is ½·L′·I², where L′ is the inductance gradient set by the rail
+     geometry. With an applied field instead it is the plain Lorentz force BIL. */
+  const inductanceGradient = (gap, railH) => (MU0 / Math.PI) * Math.acosh(1 + gap / railH);
+
+  function readPositive(el, allowZero) {
+    const v = parseFloat(el.value);
+    const ok = isFinite(v) && (allowZero ? v >= 0 : v > 0);
+    el.classList.toggle('invalid', el.value !== '' && !ok);
+    return ok ? v : NaN;
+  }
+
+  function fail(msg) {
+    els.outV.textContent = '—';
+    els.outVsub.innerHTML = '&nbsp;';
+    els.outA.textContent = '—'; els.outAsub.innerHTML = '&nbsp;';
+    els.outG.textContent = '—'; els.outGsub.innerHTML = '&nbsp;';
+    els.stats.innerHTML = ''; els.note.innerHTML = '';
+    els.err.innerHTML = `<span class="err">${msg}</span>`;
+  }
+
+  /* What the G number actually means for whatever is riding on it. */
+  function survivability(g) {
+    if (g <= 3) return 'a launch a person could ride';
+    if (g <= 9) return 'about what a fighter pilot pulls — survivable, briefly';
+    if (g <= 50) return 'no crew, but gentle for hardware';
+    if (g <= 1000) return 'structural design problem, not an exotic one';
+    if (g <= 20000) return 'gun-hardened electronics territory — artillery shells survive this';
+    if (g <= 100000) return 'beyond conventional gun-hardening; specialist potting only';
+    return 'nothing conventional survives this — the payload is the design problem';
+  }
+
+  function update() {
+    const railMode = els.mode.value === 'rail';
+    els.railRow.style.display = railMode ? '' : 'none';
+    els.extRow.style.display = railMode ? 'none' : '';
+    els.formula.textContent = railMode
+      ? 'F = ½ · L′ · I²   →   a = F / m   →   v = √(u² + 2as)'
+      : 'F = B · I · L   →   a = F / m   →   v = √(u² + 2as)';
+    els.modeHint.textContent = railMode
+      ? 'The rails make their own field. Force climbs with the square of current, so doubling the current quadruples the push.'
+      : 'An externally imposed field. Force is simply proportional to current.';
+
+    const len = readPositive(els.len) * parseFloat(els.lenUnit.value);
+    const mass = readPositive(els.mass) * parseFloat(els.massUnit.value);
+    const cur = readPositive(els.cur) * parseFloat(els.curUnit.value);
+    const u0 = readPositive(els.u0, true);
+
+    if ([len, mass, cur, u0].some(x => !isFinite(x))) {
+      return fail('Give a rail length, a mass, a current and an entry velocity.');
+    }
+
+    let force, extra = [];
+    if (railMode) {
+      const gap = readPositive(els.gap), railH = readPositive(els.railH);
+      if (!isFinite(gap) || !isFinite(railH)) return fail('Give a rail spacing and rail height.');
+      const lp = inductanceGradient(gap, railH);
+      els.gapHint.textContent = `Inductance gradient ${sig(lp * 1e6, 3)} µH/m.`;
+      force = 0.5 * lp * cur * cur;
+      extra = [
+        ['Inductance gradient', `${sig(lp * 1e6, 3)} µH/m`],
+        ['Rail repulsion', `${eng(MU0 * cur * cur / (2 * Math.PI * gap), 'N')} per metre`]
+      ];
+    } else {
+      const b = readPositive(els.bField), armL = readPositive(els.armL);
+      if (!isFinite(b) || !isFinite(armL)) return fail('Give a flux density and a conductor length.');
+      force = b * cur * armL;
+      extra = [['Field', `${sig(b, 4)} T over ${sig(armL, 4)} m`]];
+    }
+
+    const accel = force / mass;
+    const gForce = accel / G0;
+    const vSq = u0 * u0 + 2 * accel * len;
+    const vExit = Math.sqrt(vSq);
+    const time = accel > 0 ? (vExit - u0) / accel : Infinity;
+    const ke = 0.5 * mass * vSq;
+    const keIn = 0.5 * mass * u0 * u0;
+    const power = time > 0 && isFinite(time) ? (ke - keIn) / time : NaN;
+
+    els.err.innerHTML = '';
+    els.outV.innerHTML = `${sig(vExit / 1000, 4)}<span class="unit">km/s</span>`;
+    els.outVsub.textContent = `${sig(vExit, 5)} m/s — Mach ${sig(vExit / MACH1, 3)} at sea level`;
+
+    els.outA.textContent = `${sci(accel, 4)} m/s²`;
+    els.outAsub.textContent = `over ${secs(time)} in the rails`;
+    els.outG.textContent = `${sci(gForce, 4)} g`;
+    els.outGsub.textContent = survivability(gForce);
+
+    els.stats.innerHTML = [
+      ['Force on the armature', eng(force, 'N')],
+      ['Same push as lifting', tonnes(force / G0)],
+      ['Exit kinetic energy', `${eng(ke, 'J')}  (${sig(ke / 3.6e6, 3)} kWh)`],
+      ['Average mechanical power', eng(power, 'W')],
+      ['Time in the rails', secs(time)],
+      ['Rail needed for this speed at 1 g', metres(vSq / (2 * G0))],
+      ...extra
+    ].map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+
+    /* Put the exit velocity somewhere recognisable rather than leaving a bare number. */
+    const marks = [];
+    if (vExit >= V_ESCAPE) marks.push(`past Earth escape velocity (${sig(V_ESCAPE / 1000, 4)} km/s)`);
+    else if (vExit >= V_ORBIT) marks.push(`past low-orbit speed (${sig(V_ORBIT / 1000, 3)} km/s), short of escape`);
+    else marks.push(`${sig(100 * vExit / V_ORBIT, 3)} % of the ${sig(V_ORBIT / 1000, 3)} km/s a low orbit needs`);
+
+    const lenFor = target => (target * target - u0 * u0) / (2 * accel);
+    if (accel > 0 && vExit < V_ORBIT) {
+      marks.push(`reaching orbital speed at this acceleration would take ${metres(lenFor(V_ORBIT))} of rail`);
+    }
+    els.note.innerHTML = `<span class="note">${marks.join(', and ')}. ` +
+      `The object sees <b>${sci(gForce, 4)} g</b> for ${secs(time)} — ${survivability(gForce)}.</span>`;
+  }
+
+  ['len','lenUnit','mass','massUnit','cur','curUnit','u0','mode','gap','railH','bField','armL']
+    .forEach(id => els[id].addEventListener('input', update));
+  update();
+})();
+</script>
+</body>
+</html>
