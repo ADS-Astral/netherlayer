@@ -140,6 +140,7 @@ table.data th {
 }
 table.data th:first-child, table.data td:first-child { text-align: left; }
 table.data td { padding: 6px 8px; border-top: 1px solid var(--sh-light); font-variant-numeric: tabular-nums; text-align: right; }
+table.data tr.total td { border-top: 2px solid var(--sh-light); color: var(--gold2); }
 table.data td i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
 .scroll-x { overflow-x: auto; }
 
@@ -180,7 +181,7 @@ footer a:hover { color: var(--gold2); }
         </div>
       </div>
       <div class="field">
-        <label for="imax">Current axis maximum</label>
+        <label for="imax">Operating current</label>
         <div class="row">
           <input type="number" id="imax" value="2000" min="0" step="any" inputmode="decimal"/>
           <select id="iUnit">
@@ -189,6 +190,7 @@ footer a:hover { color: var(--gold2); }
             <option value="0.001">mA</option>
           </select>
         </div>
+        <p class="hint">The point everything is evaluated at, and the full scale of the chart.</p>
       </div>
     </div>
 
@@ -231,8 +233,9 @@ footer a:hover { color: var(--gold2); }
     <div class="field">
       <label for="build">Construction</label>
       <select id="build">
-        <option value="solid" selected>Solid conductor</option>
+        <option value="solid" selected>Round solid conductor</option>
         <option value="stranded">Stranded — many conductors in one cable</option>
+        <option value="bus">Rectangular busbar</option>
       </select>
     </div>
 
@@ -243,6 +246,28 @@ footer a:hover { color: var(--gold2); }
           <input type="number" id="dia" value="20" min="0" step="any" inputmode="decimal"/>
           <div class="unit-tag">mm</div>
         </div>
+      </div>
+    </div>
+
+    <div class="grid2" id="busRow" style="display:none">
+      <div class="field">
+        <label for="busW">Bar width</label>
+        <div class="row">
+          <input type="number" id="busW" value="100" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">mm</div>
+        </div>
+      </div>
+      <div class="field">
+        <label for="busT">Bar thickness</label>
+        <div class="row">
+          <input type="number" id="busT" value="10" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">mm</div>
+        </div>
+      </div>
+      <div class="field">
+        <label for="busN">Bars stacked per conductor</label>
+        <input type="number" id="busN" value="1" min="1" step="1" inputmode="numeric"/>
+        <p class="hint" id="busHint">&nbsp;</p>
       </div>
     </div>
 
@@ -311,6 +336,65 @@ footer a:hover { color: var(--gold2); }
       </div>
       <p class="hint">Torr. A glow discharge lives roughly between 0.05 and 50 Torr;
          a neon sign runs near 10.</p>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <div class="caption" style="margin-bottom:16px">Circuit</div>
+    <div class="grid2">
+      <div class="field">
+        <label for="path">Current path</label>
+        <select id="path">
+          <option value="2" selected>Out and back — return counted too</option>
+          <option value="1">One way only — return not counted</option>
+        </select>
+        <p class="hint">A circuit is a loop. Unless something else carries the return,
+           the current crosses the run twice.</p>
+      </div>
+      <div class="field">
+        <label for="nPar">Conductors in parallel</label>
+        <input type="number" id="nPar" value="1" min="1" step="1" inputmode="numeric"/>
+        <p class="hint">Whole conductors run side by side — each one divides the resistance.</p>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="nJoint">Joints and contacts</label>
+        <input type="number" id="nJoint" value="2" min="0" step="1" inputmode="numeric"/>
+      </div>
+      <div class="field">
+        <label for="rJoint">Resistance per joint</label>
+        <div class="row">
+          <input type="number" id="rJoint" value="5" min="0" step="any" inputmode="decimal"/>
+          <div class="unit-tag">µΩ</div>
+        </div>
+        <p class="hint">A bolted busbar joint is a few µΩ. At high current these stop
+           being a rounding error.</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="rExtra">Everything else in series</label>
+      <div class="row">
+        <input type="number" id="rExtra" value="0" min="0" step="any" inputmode="decimal"/>
+        <div class="unit-tag">mΩ</div>
+      </div>
+      <p class="hint">Source impedance, switchgear, the load — whatever else the current
+         has to get through.</p>
+    </div>
+  </section>
+
+  <section class="panel nm-raised">
+    <div class="caption">Total circuit resistance</div>
+    <div id="circHead" style="font-size:clamp(1.5rem,5vw,2.2rem);color:var(--gold);font-variant-numeric:tabular-nums">—</div>
+    <div id="circSub" style="color:var(--green);font-variant-numeric:tabular-nums">&nbsp;</div>
+    <div class="stats" id="circStats"></div>
+    <div class="scroll-x" style="margin-top:18px">
+      <table class="data">
+        <thead><tr><th>Contribution</th><th>Resistance</th><th>Drop</th><th>Power</th></tr></thead>
+        <tbody id="circTable"></tbody>
+      </table>
     </div>
   </section>
 
@@ -395,7 +479,9 @@ footer a:hover { color: var(--gold2); }
   const $ = id => document.getElementById(id);
   const els = {};
   ['kind','kindHint','len','lenUnit','imax','iUnit','sysV','vUnit','cablePanel','tubePanel','mat','matHint',
-   'temp','build','solidRow','strandRow','dia','nStrand','dStrand','strandHint','gas','gasHint',
+   'temp','build','solidRow','strandRow','busRow','busW','busT','busN','busHint',
+   'dia','nStrand','dStrand','strandHint','gas','gasHint',
+   'path','nPar','nJoint','rJoint','rExtra','circHead','circSub','circStats','circTable',
    'bore','cath','cathHint','sigma','p1','p2','p3','p4','p5','statsCaption','stats','err','modelNote',
    'chartCaption','chart','tip','legend','tableCaption','thead','table','footNote']
     .forEach(id => {
@@ -471,6 +557,50 @@ footer a:hover { color: var(--gold2); }
     const Vc = I <= In ? gas.Vn : gas.Vn * Math.pow(I / In, 0.4);
     const Vcol = columnField(gas, pPa, rBore) * len;
     return { V: Vc + Vcol + ANODE_FALL, Vc, Vcol, In, jn };
+  }
+
+  /* ─── Circuit ──────────────────────────────────────────────────────────
+     Whatever the conductor is, the circuit around it is the same arithmetic: the
+     run counted once or twice depending on whether the return is carried here,
+     divided by however many conductors sit in parallel, plus joints and whatever
+     else is in series. For a gas tube "resistance" only means anything at a
+     stated current, so it comes in as a chord resistance V/I. */
+  function circuit(rOneRun, iOp, sysV, label) {
+    const path = Number(els.path.value);
+    const nPar = Math.max(1, Math.round(readPositive(els.nPar)) || 1);
+    const nJoint = Math.max(0, Math.round(readPositive(els.nJoint, true)) || 0);
+    const rJoint = (readPositive(els.rJoint, true) || 0) * 1e-6;
+    const rExtra = (readPositive(els.rExtra, true) || 0) * 1e-3;
+
+    const rConductor = rOneRun * path / nPar;
+    const rJoints = nJoint * rJoint;
+    const rTotal = rConductor + rJoints + rExtra;
+
+    els.circHead.textContent = `${sci(rTotal, 5)} Ω`;
+    els.circSub.textContent = `${volts(iOp * rTotal)} lost at ${amps(iOp)} — ` +
+      `${sig(100 * iOp * rTotal / sysV, 3)} % of a ${volts(sysV)} supply`;
+
+    renderInto(els.circStats, [
+      ['Loop current', amps(iOp)],
+      ['Total drop', volts(iOp * rTotal)],
+      ['Total power lost', watts(iOp * iOp * rTotal)],
+      ['Power delivered to load', watts(iOp * Math.max(0, sysV - iOp * rTotal))],
+      ['Circuit efficiency', `${sig(100 * Math.max(0, 1 - iOp * rTotal / sysV), 6)} %`]
+    ]);
+
+    const rows = [
+      [`${label} — one run`, rOneRun],
+      [`${path === 2 ? 'Out and back' : 'One way'}${nPar > 1 ? `, ${nPar} in parallel` : ''}`, rConductor],
+      [`Joints (${nJoint} × ${sig(rJoint * 1e6, 3)} µΩ)`, rJoints],
+      ['Everything else in series', rExtra]
+    ];
+    els.circTable.innerHTML = rows.map(([k, r]) =>
+      `<tr><td>${k}</td><td>${sci(r, 4)} Ω</td><td>${volts(iOp * r)}</td><td>${watts(iOp * iOp * r)}</td></tr>`
+    ).join('') +
+      `<tr class="total"><td><b>Total circuit</b></td><td><b>${sci(rTotal, 4)} Ω</b></td>` +
+      `<td><b>${volts(iOp * rTotal)}</b></td><td><b>${watts(iOp * iOp * rTotal)}</b></td></tr>`;
+
+    return rTotal;
   }
 
   /* ─── Chart ─── */
@@ -616,10 +746,13 @@ footer a:hover { color: var(--gold2); }
     els.stats.innerHTML = ''; els.chart.innerHTML = '';
     els.legend.innerHTML = ''; els.table.innerHTML = ''; els.thead.innerHTML = '';
     els.modelNote.innerHTML = '';
+    els.circHead.textContent = '—'; els.circSub.innerHTML = '&nbsp;';
+    els.circStats.innerHTML = ''; els.circTable.innerHTML = '';
   }
 
-  const renderStats = pairs =>
-    els.stats.innerHTML = pairs.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+  const renderInto = (el, pairs) =>
+    el.innerHTML = pairs.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+  const renderStats = pairs => renderInto(els.stats, pairs);
 
   function update() {
     const tube = els.kind.value === 'tube';
@@ -642,14 +775,25 @@ footer a:hover { color: var(--gold2); }
   function runCable(len, iMax, sysV) {
     const mat = MATERIALS[Number(els.mat.value)];
     const T = parseFloat(els.temp.value);
-    const stranded = els.build.value === 'stranded';
-    els.solidRow.style.display = stranded ? 'none' : '';
-    els.strandRow.style.display = stranded ? '' : 'none';
+    const build = els.build.value;
+    els.solidRow.style.display = build === 'solid' ? '' : 'none';
+    els.strandRow.style.display = build === 'stranded' ? '' : 'none';
+    els.busRow.style.display = build === 'bus' ? '' : 'none';
     els.matHint.textContent = `ρ₂₀ = ${sci(mat.rho, 3)} Ω·m, ${(mat.alpha * 100).toFixed(3)} %/K`;
     if (!isFinite(T)) return fail('Give an operating temperature.');
 
-    let area, d1, strand = null;
-    if (stranded) {
+    let area, d1, strand = null, shape = null;
+    if (build === 'bus') {
+      const w = readPositive(els.busW) / 1000, th = readPositive(els.busT) / 1000;
+      const nb = Math.max(1, Math.round(readPositive(els.busN)) || 1);
+      if (!isFinite(w) || !isFinite(th)) return fail('Give a bar width and thickness.');
+      area = w * th * nb;
+      // Perimeter drives cooling; the equivalent round diameter is only for reporting.
+      d1 = Math.sqrt(4 * area / Math.PI);
+      shape = { w, th, nb, surface: 2 * (w + th) * len * nb };
+      els.busHint.textContent = `${sig(w * 1000, 3)} × ${sig(th * 1000, 3)} mm` +
+        `${nb > 1 ? ` × ${nb} bars` : ''} — ${sig(area * 1e6, 4)} mm² of copperwork.`;
+    } else if (build === 'stranded') {
       const n = readPositive(els.nStrand), ds = readPositive(els.dStrand) / 1000;
       if (!isFinite(n) || !isFinite(ds)) return fail('Give a strand count and a strand diameter.');
       area = n * Math.PI * ds * ds / 4;
@@ -671,19 +815,23 @@ footer a:hover { color: var(--gold2); }
       ['Cross-section', `${sig(area * 1e6, 4)} mm²`],
       [`Resistance at ${sig(T, 3)} °C`, `${sci(R, 4)} Ω`],
       ['Resistance per km', `${sci(R * 1000 / len, 4)} Ω/km`],
-      ['Outer diameter', `${sig(d1 * 1000, 4)} mm`],
+      [shape ? 'Equivalent round diameter' : 'Outer diameter', `${sig(d1 * 1000, 4)} mm`],
       ['Conductor mass', `${sig(area * len * mat.den, 4)} kg`],
+      ['Mass per metre', `${sig(area * mat.den, 4)} kg/m`],
       ['Current density at full scale', `${sig(iMax / (area * 1e6), 4)} A/mm²`],
       ['Drop at full scale', volts(iMax * R)],
       ['Drop as % of system voltage', `${sig(100 * iMax * R / sysV, 3)} %`],
       ['Power delivered', watts(iMax * (sysV - iMax * R))],
       ['Power lost in the run', watts(iMax * iMax * R)],
-      ['Transmission efficiency', `${sig(100 * (1 - iMax * R / sysV), 4)} %`]
+      ['Transmission efficiency', `${sig(100 * (1 - iMax * R / sysV), 6)} %`]
     ];
     if (Math.abs(T - 20) > 0.01) stats.splice(2, 0, ['Resistance at 20 °C', `${sci(resistance(20, geom, mat), 4)} Ω`]);
     if (strand) {
       stats.push(['Surface area, all strands', `${sig(strand.surface, 4)} m²`]);
       stats.push(['Against one solid conductor', `${sig(strand.surface / solidSurface, 3)}× (${sig(solidSurface, 4)} m²)`]);
+    } else if (shape) {
+      stats.push(['Bar section', `${sig(shape.w * 1000, 3)} × ${sig(shape.th * 1000, 3)} mm${shape.nb > 1 ? ` × ${shape.nb}` : ''}`]);
+      stats.push(['Surface area', `${sig(shape.surface, 4)} m²`]);
     } else {
       stats.push(['Surface area', `${sig(solidSurface, 4)} m²`]);
     }
@@ -722,6 +870,8 @@ footer a:hover { color: var(--gold2); }
       return `<tr><td>${amps(I)}</td><td>${volts(I * R)}</td>` +
         `<td>${watts(I * I * R)}</td><td>${volts(I * R * 1000 / len)}/km</td></tr>`;
     }).join('');
+
+    circuit(R, iMax, sysV, 'Conductor');
 
     els.footNote.textContent = 'A metal cable obeys Ohm’s law: resistance is set by material, ' +
       'geometry and temperature, and the drop is simply I × R. Resistance here is DC — no skin or proximity effect.';
@@ -813,6 +963,26 @@ footer a:hover { color: var(--gold2); }
         `<td>${volts(last.v)} (${last.regime})</td></tr>`;
     }).join('');
 
+    /* A discharge has no fixed resistance — only a chord resistance V/I at a stated
+       current. Take the middle of the five pressures as the operating fill; in the
+       arc regime the choice barely matters, which the chart shows plainly. */
+    const pOp = pressures[2];
+    const tOp = tubeVoltage(iMax, gas, pOp, r, len, cathArea);
+    let vOp, regimeOp;
+    if (iMax <= ARC_RATIO * tOp.In) { vOp = tOp.V; regimeOp = 'glow'; }
+    else if (iMax >= MIN_ARC) { vOp = arcVoltage(iMax, sigma, r, len).V; regimeOp = 'arc'; }
+    else { vOp = NaN; regimeOp = 'unstable'; }
+
+    if (isFinite(vOp)) {
+      circuit(vOp / iMax, iMax, sysV, `Gas column at ${sig(pOp / TORR, 3)} Torr (${regimeOp})`);
+    } else {
+      els.circHead.textContent = '—';
+      els.circSub.textContent = `At ${amps(iMax)} the tube sustains neither a glow nor an arc — ` +
+        'it sits in the unstable transition. Pick a current either side of it.';
+      els.circStats.innerHTML = '';
+      els.circTable.innerHTML = '';
+    }
+
     const anyArc = series.some(s => s.pts.some(q => q.regime === 'arc'));
     els.modelNote.innerHTML = '<span class="note">' + (anyArc
       ? 'Two regimes are on this chart. The flat and rising branches are a <b>glow</b>, where ' +
@@ -833,7 +1003,8 @@ footer a:hover { color: var(--gold2); }
   }
 
   ['kind','len','lenUnit','imax','iUnit','sysV','vUnit','mat','temp','build','dia','nStrand',
-   'dStrand','gas','bore','cath','sigma','p1','p2','p3','p4','p5'].forEach(id => els[id].addEventListener('input', update));
+   'dStrand','busW','busT','busN','gas','bore','cath','sigma','p1','p2','p3','p4','p5',
+   'path','nPar','nJoint','rJoint','rExtra'].forEach(id => els[id].addEventListener('input', update));
   els.kind.addEventListener('change', () => {
     // Discharge currents are milliamps; cable currents are amps.
     if (els.kind.value === 'tube') {
