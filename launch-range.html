@@ -127,6 +127,16 @@ input[type=range]::-moz-range-thumb { width: 15px; height: 15px; border: none; b
 }
 .btn.fire:hover:not(:disabled) { border-color: var(--red); color: #fff; }
 
+/* ─── Compass ─── */
+.compass { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin-top: 7px; }
+.compass button {
+  padding: 4px 0; font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  background: #0a0a16; color: var(--muted); cursor: pointer;
+  border: 1px solid rgba(212,175,55,.16); border-radius: 6px;
+}
+.compass button:hover { color: var(--gold2); border-color: var(--gold); }
+.compass button.on { background: var(--gold); color: #0e0e1c; border-color: var(--gold); }
+
 /* ─── Verdict ─── */
 #verdict { padding: 12px 14px; margin-bottom: 12px; }
 #flag {
@@ -207,6 +217,25 @@ body:not(.flying) #flightbar { display: none; }
 #panel-btn.show { display: flex; }
 body.placing .maplibregl-canvas { cursor: crosshair; }
 
+/* ─── Countdown ─── */
+#countdown {
+  position: absolute; inset: 0; z-index: 34;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: radial-gradient(circle at 50% 45%, rgba(5,5,16,.45), rgba(5,5,16,.82) 70%);
+  pointer-events: none;
+}
+#countdown .btn { pointer-events: auto; }
+.cd-num {
+  font-size: clamp(64px, 14vw, 150px); font-weight: 700; line-height: 1;
+  color: var(--gold2); letter-spacing: .04em;
+  text-shadow: 0 0 40px rgba(212,175,55,.45);
+  font-variant-numeric: tabular-nums;
+}
+.cd-num.go { color: #ff9b4a; text-shadow: 0 0 60px rgba(231,76,60,.6); font-size: clamp(40px, 8vw, 86px); }
+.cd-cap { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); text-align: center; padding: 0 16px; }
+.cd-bar { width: min(320px, 60vw); height: 3px; background: rgba(212,175,55,.16); border-radius: 3px; overflow: hidden; }
+.cd-bar i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .3s linear; }
+
 /* ─── Loader / toast ─── */
 #loader {
   position: absolute; inset: 0; z-index: 40;
@@ -281,6 +310,21 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
       <label>Azimuth
         <input type="number" id="azimuth" value="90" min="0" max="359" step="1"/>
       </label>
+    </div>
+    <div class="row" style="padding-bottom:0">
+      <label for="azdial">Rotate the aim</label>
+      <span class="val" id="azlbl">090° · E</span>
+    </div>
+    <input type="range" id="azdial" min="0" max="359" step="1" value="90"/>
+    <div class="compass" id="compass">
+      <button type="button" data-az="0">N</button>
+      <button type="button" data-az="45">NE</button>
+      <button type="button" data-az="90">E</button>
+      <button type="button" data-az="135">SE</button>
+      <button type="button" data-az="180">S</button>
+      <button type="button" data-az="225">SW</button>
+      <button type="button" data-az="270">W</button>
+      <button type="button" data-az="315">NW</button>
     </div>
     <p class="hint" id="padhint">&nbsp;</p>
   </div>
@@ -422,6 +466,13 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     <button class="btn" id="endbtn">⇥ End</button>
     <button class="btn" id="reset">✕ Exit flight</button>
   </div>
+</div>
+
+<div id="countdown" hidden>
+  <div class="cd-num" id="cd-num">10</div>
+  <div class="cd-cap" id="cd-cap">Loading the ground along the flight path</div>
+  <div class="cd-bar"><i id="cd-fill"></i></div>
+  <button class="btn" id="cd-skip" style="width:auto;padding:7px 18px">Skip the count</button>
 </div>
 
 <div id="toast" class="nm"></div>
@@ -896,9 +947,13 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   var PATH_FRAG = [
     'precision mediump float;',
     'uniform float u_progress;',
+    'uniform float u_hide_ahead;',
     'varying float v_s;',
     'void main() {',
     '  bool flown = v_s <= u_progress;',
+    /* In flight there is nothing ahead of the nose to see: the arc it
+       has yet to fly would sit right down the barrel of the camera. */
+    '  if (!flown && u_hide_ahead > 0.5) discard;',
     /* Behind the projectile the trail is hot; ahead of it the prediction
        is a faint dotted-looking thread. */
     '  vec3 c = flown ? vec3(1.0, 0.78, 0.35) : vec3(0.45, 0.50, 0.78);',
@@ -1009,7 +1064,8 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
           uMerc: gl.getUniformLocation(pathProg, 'u_mercator'),
           uClip: gl.getUniformLocation(pathProg, 'u_globe_clip'),
           uTrans: gl.getUniformLocation(pathProg, 'u_transition'),
-          uProgress: gl.getUniformLocation(pathProg, 'u_progress')
+          uProgress: gl.getUniformLocation(pathProg, 'u_progress'),
+          uHideAhead: gl.getUniformLocation(pathProg, 'u_hide_ahead')
         },
         gl: gl
       };
@@ -1041,6 +1097,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
         gl.uniform4f(P.uClip, plane[0], plane[1], plane[2], plane[3]);
         gl.uniform1f(P.uTrans, t);
         gl.uniform1f(P.uProgress, scene.progress);
+        gl.uniform1f(P.uHideAhead, flight.active ? 1 : 0);
         var eye = cameraEye();
         var eg = globePoint(eye.lng, eye.lat, eye.alt);
         gl.uniform3f(P.uCam, eg[0], eg[1], eg[2]);
@@ -1796,11 +1853,169 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     }, { passive: false });
   })();
 
+  /* ════════════════════════════════════════════════════════════
+     THE COUNT
+     Ten seconds of theatre with a job to do: pull the tiles the
+     flight is about to cross into the browser cache so the ground
+     is already there when the camera arrives.
+     ════════════════════════════════════════════════════════════ */
+
+  var countdown = { timer: null, left: 0, running: false };
+
+  function lngLatToTile(lng, lat, z) {
+    var n = Math.pow(2, z);
+    var x = Math.floor((((lng + 180) % 360 + 360) % 360) / 360 * n);
+    var l = Math.max(-85.05, Math.min(85.05, lat)) * D2R;
+    var y = Math.floor((1 - Math.log(Math.tan(l) + 1 / Math.cos(l)) / Math.PI) / 2 * n);
+    return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
+  }
+
+  function tilesForFlight() {
+    var style = map.getStyle();
+    var base = ['imagery', 'topo', 'dark'].filter(function (id) {
+      return map.getLayoutProperty(id, 'visibility') !== 'none';
+    })[0] || 'imagery';
+    var templates = [style.sources[base].tiles[0], style.sources.dem.tiles[0]];
+    var pts = solution.points;
+    var urls = [], seen = {};
+
+    /* Sample the ground track densely near the pad, where the camera is
+       low and the detail is high, and sparsely once the ground is a
+       long way below. */
+    var STEPS = 24;
+    for (var i = 0; i < STEPS; i++) {
+      var p = pts[Math.min(pts.length - 1, Math.round(i / (STEPS - 1) * (pts.length - 1)))];
+      var zooms = i < 5 ? [11, 13, 15] : i < 12 ? [10, 12, 14] : [9, 11, 13];
+      for (var zi = 0; zi < zooms.length; zi++) {
+        var z = zooms[zi];
+        var t = lngLatToTile(p.lng, p.lat, z);
+        for (var dx = -1; dx <= 1; dx++) {
+          for (var dy = -1; dy <= 1; dy++) {
+            /* neighbours only at the coarsest level, and only edge-on */
+            if (zi > 0 && (dx || dy)) continue;
+            if (dx && dy) continue;
+            var n = Math.pow(2, z);
+            var tx = ((t.x + dx) % n + n) % n, ty = t.y + dy;
+            if (ty < 0 || ty >= n) continue;
+            for (var ti = 0; ti < templates.length; ti++) {
+              var url = templates[ti]
+                .replace('{z}', z).replace('{x}', tx).replace('{y}', ty);
+              if (seen[url]) continue;
+              seen[url] = 1;
+              urls.push(url);
+            }
+          }
+        }
+      }
+    }
+    return urls;
+  }
+
+  /* Warm the HTTP cache: the map asks for these same URLs moments later. */
+  function preloadTiles(urls, onProgress) {
+    var done = 0, at = 0, LANES = 4, stopped = false;
+    function next() {
+      if (stopped || at >= urls.length) return;
+      var url = urls[at++];
+      fetch(url, { mode: 'cors', cache: 'force-cache' })
+        .then(function (r) { return r.blob(); })
+        .catch(function () { /* a missing tile is not worth stopping for */ })
+        .then(function () {
+          done++;
+          onProgress(done / urls.length);
+          next();
+        });
+    }
+    for (var i = 0; i < LANES; i++) next();
+    return function () { stopped = true; };
+  }
+
+  function beginCountdown() {
+    if (!solution || countdown.running || flight.active) return;
+    countdown.running = true;
+    countdown.left = 10;
+    $('fire').disabled = true;
+    $('countdown').hidden = false;
+    $('cd-num').classList.remove('go');
+    $('cd-num').textContent = '10';
+    $('cd-cap').textContent = 'Loading the ground along the flight path';
+    $('cd-fill').style.width = '0%';
+
+    /* Start the clock before doing any work, so a slow machine eats into
+       the count rather than delaying it. Read the clock rather than
+       counting ticks: loading the ground can stall a frame, and a timer
+       that catches up in a burst would sprint through the count. */
+    var t0 = performance.now();
+    var stopPreload = null;
+    countdown.timer = setInterval(function () {
+      var left = Math.ceil(10 - (performance.now() - t0) / 1000);
+      if (left > 0) {
+        if (left !== countdown.left) {
+          countdown.left = left;
+          $('cd-num').textContent = String(left);
+        }
+        return;
+      }
+      clearInterval(countdown.timer);
+      countdown.timer = null;
+      $('cd-num').textContent = 'LAUNCH';
+      $('cd-num').classList.add('go');
+      setTimeout(function () {
+        countdown.running = false;
+        if (stopPreload) stopPreload();
+        $('countdown').hidden = true;
+        $('fire').disabled = false;
+        startFlight();
+      }, 700);
+    }, 100);
+
+    /* Now the work the count exists to cover. */
+    setTimeout(function () {
+      if (!countdown.running) return;
+      var urls = tilesForFlight();
+      $('cd-cap').textContent = 'Loading ' + urls.length + ' tiles along the flight path';
+      stopPreload = preloadTiles(urls, function (frac) {
+        $('cd-fill').style.width = Math.round(frac * 100) + '%';
+        if (frac >= 1) $('cd-cap').textContent = 'Ground loaded — standing by';
+      });
+
+      /* Hold the pad shot while it counts. */
+      setCamera('pad');
+      var th = solution.angle * D2R, az = solution.azimuth * D2R;
+      var muzzle = offsetLL(pad,
+        Math.cos(th) * Math.sin(az) * solution.railLen,
+        Math.cos(th) * Math.cos(az) * solution.railLen,
+        Math.sin(th) * solution.railLen);
+      var back = 120 + solution.railLen * 0.5;
+      aimCamera(offsetLL(pad, -Math.sin(az) * back - Math.cos(az) * back * 0.3,
+                              -Math.cos(az) * back + Math.sin(az) * back * 0.3, 40), muzzle);
+    }, 0);
+  }
+
+  function abortCountdown() {
+    if (!countdown.running) return;
+    if (countdown.timer) clearInterval(countdown.timer);
+    countdown.timer = null;
+    countdown.running = false;
+    $('countdown').hidden = true;
+    $('fire').disabled = false;
+  }
+
+  $('cd-skip').addEventListener('click', function () {
+    if (!countdown.running) return;
+    if (countdown.timer) clearInterval(countdown.timer);
+    countdown.timer = null;
+    countdown.running = false;
+    $('countdown').hidden = true;
+    $('fire').disabled = false;
+    startFlight();
+  });
+
   /* ─── Flight controls ─── */
   $('fire').addEventListener('click', function () {
     if (!solution) return;
     setPicking(false);
-    startFlight();
+    beginCountdown();
   });
   $('reset').addEventListener('click', endFlight);
   $('playpause').addEventListener('click', function () {
@@ -1831,7 +2046,11 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
 
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    if (e.key === 'Escape') { if (picking) setPicking(false); else if (flight.active) endFlight(); }
+    if (e.key === 'Escape') {
+      if (countdown.running) abortCountdown();
+      else if (picking) setPicking(false);
+      else if (flight.active) endFlight();
+    }
     else if (e.key === ' ' && flight.active) { e.preventDefault(); $('playpause').click(); }
     else if (flight.active && e.key >= '1' && e.key <= '5') setCamera(CAMERAS[Number(e.key) - 1].id);
   });
@@ -1845,6 +2064,36 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   DESTS.forEach(function (d, i) { $('dest').add(new Option(d.name, String(i))); });
   $('shape').value = '0'; $('capType').value = '0'; $('dest').value = '2';
 
+  var COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  function azLabel(a) {
+    return String(Math.round(a)).padStart(3, '0') + '° · ' + COMPASS[Math.round(a / 22.5) % 16];
+  }
+  function syncAzimuth(a, from) {
+    a = ((Math.round(a) % 360) + 360) % 360;
+    if (from !== 'box') $('azimuth').value = String(a);
+    if (from !== 'dial') $('azdial').value = String(a);
+    $('azlbl').textContent = azLabel(a);
+    var kids = $('compass').children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].classList.toggle('on', Number(kids[i].dataset.az) === a);
+    }
+  }
+  /* Dragging the dial re-solves the whole flight, so hold it to one
+     solve per pause rather than one per pixel. A timer, not a frame
+     callback: frames stop arriving when the map is idle. */
+  var aimTimer = null;
+  function aimChanged(a, from) {
+    syncAzimuth(a, from);
+    clearTimeout(aimTimer);
+    aimTimer = setTimeout(solve, 40);
+  }
+  $('azdial').addEventListener('input', function (e) { aimChanged(Number(e.target.value), 'dial'); });
+  $('azimuth').addEventListener('input', function (e) { aimChanged(Number(e.target.value), 'box'); });
+  Array.prototype.forEach.call($('compass').children, function (b) {
+    b.addEventListener('click', function () { aimChanged(Number(b.dataset.az)); });
+  });
+
   $('pick').addEventListener('click', function () { setPicking(!picking); });
   $('dest').addEventListener('change', function () {
     var d = DESTS[Number($('dest').value)];
@@ -1852,7 +2101,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     solve();
   });
   $('alt').addEventListener('input', function () { $('dest').value = '0'; solve(); });
-  ['mPay','mPayUnit','mSabot','dPay','shape','angle','azimuth','rail','railUnit','gap','railH',
+  ['mPay','mPayUnit','mSabot','dPay','shape','angle','rail','railUnit','gap','railH',
    'capType','cap','capUnit','volt','voltUnit','res','resUnit','ind'].forEach(function (id) {
     $(id).addEventListener('input', solve);
     $(id).addEventListener('change', solve);
