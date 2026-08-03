@@ -193,6 +193,12 @@ body:not(.flying) #flightbar { display: none; }
 }
 .cam:hover { color: var(--gold2); border-color: rgba(212,175,55,.5); }
 .cam.on { color: #0e0e1c; background: var(--gold); border-color: var(--gold); font-weight: 700; }
+.cams.waiting { opacity: .45; }
+.cams.waiting::after {
+  content: 'globe view — resumes below 88 km';
+  flex-basis: 100%; text-align: center; margin-top: 4px;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold2);
+}
 .playrow { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 9px; }
 .playrow .lbl { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .playrow .rate { font-size: 11.5px; color: var(--gold2); font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
@@ -456,7 +462,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   <div class="cams" id="cams"></div>
   <div class="playrow">
     <span class="lbl">Pace</span>
-    <input type="range" id="rate" min="0" max="1000" step="1" value="1000"/>
+    <input type="range" id="rate" min="0" max="1000" step="1" value="500"/>
     <span class="rate" id="ratelbl">real time</span>
   </div>
   <input type="range" id="scrub" min="0" max="1000" step="1" value="0"/>
@@ -1418,10 +1424,17 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     var vCirc = Math.sqrt(GM / rTarget);
     var downrange = groundDistance(pad, pts[pts.length - 1]);
 
+    /* One zoom for the whole time it is out of the atmosphere: wide
+       enough to hold the arc, and never changed, so nothing pops. */
+    var span = Math.max(downrange * 1.4, flightSol.apogee * 3, 400000);
+    var spaceMpp = span / Math.max(400, map.getCanvas().clientWidth);
+    var spaceZoom = Math.log2(40075016.686 * Math.cos(pad.lat * D2R) / (512 * spaceMpp));
+
     solution = {
       shot: shot, flight: flightSol, points: pts, mass: mass, mPay: mPay,
       angle: angle, azimuth: azimuth, railLen: railLen, targetAlt: targetAlt,
-      vCirc: vCirc, gPeak: gPeak, downrange: downrange, dur: dur
+      vCirc: vCirc, gPeak: gPeak, downrange: downrange, dur: dur,
+      spaceZoom: Math.max(1.6, Math.min(6, spaceZoom))
     };
 
     buildPathMesh(pts);
@@ -1562,19 +1575,22 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   var flight = {
     active: false, t: 0, rate: 1, playing: false, cam: 'chase',
     raf: null, last: 0,
+    space: false, spaceBlend: 0,
     orbit: { az: 150, el: 22, dist: 900 }
   };
 
+  /* A fiftieth of real time at one end, fifty times it at the other,
+     real time exactly in the middle. */
+  var RATE_DECADES = Math.log10(50);
   function rateFromSlider(v) {
-    /* 0 → 1/50 of real time, 1000 → real time, logarithmic in between. */
-    var f = v / 1000;
-    return Math.pow(10, -1.69897 * (1 - f));
+    return Math.pow(10, (v / 1000 * 2 - 1) * RATE_DECADES);
   }
   function sliderFromRate(r) {
-    return Math.round(1000 * (1 - Math.log10(r) / -1.69897));
+    return Math.round(1000 * (Math.log10(r) / RATE_DECADES + 1) / 2);
   }
   function rateLabel(r) {
-    if (r >= 0.999) return 'real time';
+    if (r > 1.04) return (r < 9.5 ? r.toFixed(1) : String(Math.round(r))) + ' × real time';
+    if (r >= 0.96) return 'real time';
     return '1/' + Math.round(1 / r) + ' × real time';
   }
 
@@ -1619,8 +1635,8 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     };
   }
 
-  /* Point the camera: eye and target as {lng, lat, alt}. */
-  function aimCamera(eye, target) {
+  /* Solve the camera: eye and target as {lng, lat, alt}. */
+  function solveCamera(eye, target) {
     var m = metresPerDegree(eye.lat);
     var dE = (target.lng - eye.lng) * m.lng;
     var dN = (target.lat - eye.lat) * m.lat;
@@ -1628,25 +1644,60 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     var dist = Math.max(1, Math.hypot(dE, dN, dU));
     var u = [dE / dist, dN / dist, dU / dist];
     var c2c = (map.getCanvas().clientHeight / 2) / Math.tan(map.transform.fov * D2R / 2);
-    var mpp = dist / c2c;
-    var zoom = Math.log2(40075016.686 * Math.cos(target.lat * D2R) / (512 * mpp));
+    var zoom = Math.log2(40075016.686 * Math.cos(target.lat * D2R) / (512 * (dist / c2c)));
     /* 0 looks straight down, 90 is level, 180 looks straight up. */
     var pitch = Math.acos(Math.max(-1, Math.min(1, -u[2]))) / D2R;
     /* Out of the atmosphere the renderer smears the world across the
        frame once the camera tips past level, so those shots stop just
-       short of it — the target drifts a couple of degrees high, which
-       costs nothing when there is nothing above it but space. */
+       short of it. */
     if (eye.alt > 30000) pitch = Math.min(pitch, 88);
-    map.jumpTo({
+    return {
       center: [target.lng, target.lat],
       elevation: target.alt,
       zoom: Math.max(0.5, Math.min(22, zoom)),
       pitch: pitch,
       bearing: Math.atan2(u[0], u[1]) / D2R
-    });
+    };
+  }
+  function aimCamera(eye, target) { map.jumpTo(solveCamera(eye, target)); }
+
+  /* ── Above the atmosphere ──────────────────────────────────────────
+     High up and close in, the map has to draw thousands of kilometres of
+     ground through a camera the mercator renderer was never meant to
+     hold, and it tears. So above the Kármán line the range stops
+     pretending: the view pulls out to the globe, the zoom locks, and the
+     shot is watched as an arc over the planet until it comes back down.
+     ────────────────────────────────────────────────────────────────── */
+  var SPACE_ENTER = 100000, SPACE_LEAVE = 88000;
+
+  function spaceCameraParams(st) {
+    var o = flight.orbit;
+    var dragging = flight.cam === 'orbit';
+    return {
+      center: [st.lng, st.lat],
+      elevation: 0,
+      zoom: solution.spaceZoom,                    /* locked while up here */
+      pitch: dragging ? Math.max(0, Math.min(72, 40 - o.el)) : 34,
+      bearing: dragging ? o.az : solution.azimuth
+    };
   }
 
-  function cameraFor(st) {
+  function lerpAngle(a, b, f) {
+    var d = ((b - a + 540) % 360) - 180;
+    return a + d * f;
+  }
+  function blendCamera(a, b, f) {
+    return {
+      center: [a.center[0] + (b.center[0] - a.center[0]) * f,
+               a.center[1] + (b.center[1] - a.center[1]) * f],
+      elevation: a.elevation + (b.elevation - a.elevation) * f,
+      zoom: a.zoom + (b.zoom - a.zoom) * f,
+      pitch: a.pitch + (b.pitch - a.pitch) * f,
+      bearing: lerpAngle(a.bearing, b.bearing, f)
+    };
+  }
+
+  function surfaceCameraParams(st) {
     var proj = { lng: st.lng, lat: st.lat, alt: st.alt };
     var d = st.dir;
     var height = Math.max(1, st.alt - pad.alt);
@@ -1660,14 +1711,11 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
                               -Math.cos(az) * back + Math.sin(az) * back * 0.28,
                               30 + height * 0.02);
       /* Aim short of the projectile so the horizon stays in view. */
-      var m = metresPerDegree(pad.lat);
-      var look = {
+      return solveCamera(eye, {
         lng: pad.lng + (proj.lng - pad.lng) * 0.78,
         lat: pad.lat + (proj.lat - pad.lat) * 0.78,
         alt: pad.alt + (proj.alt - pad.alt) * 0.7
-      };
-      aimCamera(eye, look);
-      return;
+      });
     }
     if (flight.cam === 'chase') {
       /* Offset sideways as well as up, or the camera sits inside its own
@@ -1675,28 +1723,55 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
       var lag = Math.max(140, Math.min(90000, height * 0.3 + 180));
       var side = [-d[1], d[0], 0];
       var sl = Math.hypot(side[0], side[1]) || 1;
-      aimCamera(offsetLL(proj,
+      return solveCamera(offsetLL(proj,
         -d[0] * lag + side[0] / sl * lag * 0.30,
         -d[1] * lag + side[1] / sl * lag * 0.30,
         -d[2] * lag + lag * 0.26), proj);
-      return;
     }
     if (flight.cam === 'nose') {
       var lead = Math.max(60, Math.min(40000, height * 0.06 + 60));
-      aimCamera(proj, offsetLL(proj, d[0] * lead, d[1] * lead, d[2] * lead));
-      return;
+      return solveCamera(proj, offsetLL(proj, d[0] * lead, d[1] * lead, d[2] * lead));
     }
     if (flight.cam === 'tail') {
       var behind = Math.max(60, Math.min(40000, height * 0.06 + 60));
-      aimCamera(proj, offsetLL(proj, -d[0] * behind, -d[1] * behind, -d[2] * behind));
-      return;
+      return solveCamera(proj, offsetLL(proj, -d[0] * behind, -d[1] * behind, -d[2] * behind));
     }
     /* orbit — the user's own angle on the projectile */
     var o = flight.orbit;
     var r = o.dist * Math.max(1, height / 4000);
     var ca = Math.cos(o.az * D2R), sa = Math.sin(o.az * D2R);
     var ce = Math.cos(o.el * D2R), se = Math.sin(o.el * D2R);
-    aimCamera(offsetLL(proj, -sa * ce * r, -ca * ce * r, se * r), proj);
+    return solveCamera(offsetLL(proj, -sa * ce * r, -ca * ce * r, se * r), proj);
+  }
+
+  function cameraFor(st, dt) {
+    var wantSpace = st.alt > (flight.space ? SPACE_LEAVE : SPACE_ENTER);
+    if (wantSpace !== flight.space) {
+      flight.space = wantSpace;
+      /* Coming back down a few thousand kilometres from where it left,
+         the pad camera would be staring at its own horizon. */
+      if (!wantSpace && flight.cam === 'pad' && groundDistance(pad, st) > 200000) {
+        setCamera('chase');
+        toast('Re-entry is over the horizon from the pad — switching to chase', 3600);
+      } else {
+        setCamera(flight.cam);        /* refresh the readout */
+        toast(wantSpace
+          ? 'Above the Kármán line — pulling out to the globe, zoom locked'
+          : 'Back inside the atmosphere — cameras released', 3200);
+      }
+    }
+    /* Ease across the boundary rather than cutting. */
+    var target = flight.space ? 1 : 0;
+    var step = Math.min(1, Math.max(0.0001, (dt || 0.016)) / 1.1);
+    flight.spaceBlend += (target - flight.spaceBlend) * Math.min(1, step * 4);
+    if (Math.abs(target - flight.spaceBlend) < 0.002) flight.spaceBlend = target;
+
+    var f = flight.spaceBlend;
+    var params;
+    if (f <= 0.001) params = surfaceCameraParams(st);
+    else if (f >= 0.999) params = spaceCameraParams(st);
+    else params = blendCamera(surfaceCameraParams(st), spaceCameraParams(st), f);
+    map.jumpTo(params);
   }
 
   /* Low down and tilted over, the terrain mesh stops short of the real
@@ -1755,7 +1830,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
       }
     }
     var st = stateAt(flight.t);
-    cameraFor(st);
+    cameraFor(st, dt);
     updateFlightVisuals(st);
     flight.raf = requestAnimationFrame(frame);
   }
@@ -1763,6 +1838,8 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   function startFlight() {
     if (!solution) return;
     flight.active = true;
+    flight.space = false;
+    flight.spaceBlend = 0;
     flight.t = 0;
     flight.playing = true;
     flight.last = 0;
@@ -1772,16 +1849,8 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     map.dragRotate.disable(); map.touchZoomRotate.disable(); map.keyboard.disable();
     map.doubleClickZoom.disable();
 
-    var fast = solution.shot.v > 12000;
-    flight.rate = fast ? 0.05 : 1;
-    $('rate').value = String(sliderFromRate(flight.rate));
-    $('ratelbl').textContent = rateLabel(flight.rate);
-    setCamera(fast ? 'chase' : 'pad');
+    setCamera(solution.shot.v > 12000 ? 'chase' : 'pad');
     $('playpause').textContent = '❚❚ Pause';
-    if (fast) {
-      toast('Muzzle velocity ' + sig(solution.shot.v / 1000, 3) +
-            ' km/s — playing at 1/20 real time so the flight is watchable.', 5000);
-    }
     flight.raf = requestAnimationFrame(frame);
   }
 
@@ -1817,7 +1886,9 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     var kids = $('cams').children;
     for (var i = 0; i < kids.length; i++) kids[i].classList.toggle('on', kids[i].dataset.cam === id);
     var label = CAMERAS.filter(function (c) { return c.id === id; })[0];
-    $('h-cam').textContent = label ? label.label.replace(' (drag)', '') : '—';
+    var name = label ? label.label.replace(' (drag)', '') : '—';
+    $('h-cam').textContent = flight.space ? 'Globe · locked' : name;
+    $('cams').classList.toggle('waiting', !!flight.space);
   }
 
   CAMERAS.forEach(function (c) {
@@ -1945,6 +2016,16 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
        the count rather than delaying it. Read the clock rather than
        counting ticks: loading the ground can stall a frame, and a timer
        that catches up in a burst would sprint through the count. */
+    /* Set the pace now, so it is on screen before the shot goes. */
+    var fast = solution.shot.v > 12000;
+    flight.rate = fast ? 0.05 : 1;
+    $('rate').value = String(sliderFromRate(flight.rate));
+    $('ratelbl').textContent = rateLabel(flight.rate);
+    if (fast) {
+      toast('Muzzle velocity ' + sig(solution.shot.v / 1000, 3) +
+            ' km/s — starting at 1/20 real time so the flight is watchable.', 5000);
+    }
+
     var t0 = performance.now();
     var stopPreload = null;
     countdown.timer = setInterval(function () {
