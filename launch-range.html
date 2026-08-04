@@ -752,7 +752,8 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
      they come back identical, that is the placeholder. If they differ,
      the service has changed and the filter stays off.
      ──────────────────────────────────────────────────────────────── */
-  var emptyTileHash = null, emptyTileReady = null;
+  var emptyHashes = Object.create(null);   /* bodies known to be the apology */
+  var emptyTileReady = null;
 
   function hashBytes(buf) {
     var b = new Uint8Array(buf), h = 2166136261;
@@ -760,6 +761,43 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     return b.length + ':' + h;
   }
 
+  /* Draw a tile down to 8×8 and describe it. The apology is a flat,
+     perfectly neutral light grey; deep water is flat but blue, and real
+     imagery is neither flat nor neutral. */
+  function tileLooksEmpty(buf) {
+    if (buf.byteLength > 6000) return Promise.resolve(false);   /* real imagery is fatter */
+    var blob = new Blob([buf]);
+    var draw = function (src) {
+      var c = document.createElement('canvas');
+      c.width = 8; c.height = 8;
+      var ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(src, 0, 0, 8, 8);
+      var d = ctx.getImageData(0, 0, 8, 8).data;
+      var r = 0, g = 0, b = 0, n = 64, i;
+      for (i = 0; i < n; i++) { r += d[i * 4]; g += d[i * 4 + 1]; b += d[i * 4 + 2]; }
+      r /= n; g /= n; b /= n;
+      var spread = 0;
+      for (i = 0; i < n; i++) {
+        spread = Math.max(spread, Math.abs(d[i * 4] - r), Math.abs(d[i * 4 + 1] - g), Math.abs(d[i * 4 + 2] - b));
+      }
+      var neutral = Math.max(r, g, b) - Math.min(r, g, b);
+      return neutral <= 8 && r > 185 && r < 228 && spread <= 26;
+    };
+    if (typeof createImageBitmap === 'function') {
+      return createImageBitmap(blob).then(draw).catch(function () { return false; });
+    }
+    return new Promise(function (res) {
+      var url = URL.createObjectURL(blob), img = new Image();
+      img.onload = function () { var v = false; try { v = draw(img); } catch (e) {} URL.revokeObjectURL(url); res(v); };
+      img.onerror = function () { URL.revokeObjectURL(url); res(false); };
+      img.src = url;
+    });
+  }
+
+  /* Two tiles from opposite sides of the world, far past any coverage.
+     Identical means we have the apology's fingerprint before the first
+     screenful is judged; if the probe fails, the look of the tile is
+     still enough on its own. */
   function learnEmptyTile() {
     if (emptyTileReady) return emptyTileReady;
     var probes = [
@@ -769,17 +807,22 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     emptyTileReady = Promise.all(probes.map(function (u) {
       return fetch(u).then(function (r) { return r.arrayBuffer(); }).then(hashBytes);
     })).then(function (h) {
-      if (h[0] === h[1]) emptyTileHash = h[0];
-    }).catch(function () { /* leave the filter off */ });
+      if (h[0] === h[1]) emptyHashes[h[0]] = true;
+    }).catch(function () { /* the pixel test carries it alone */ });
     return emptyTileReady;
   }
-
   learnEmptyTile();
 
+  /* ── Imagery that runs out ────────────────────────────────────────
+     Past the resolution it holds for a place, the imagery service hands
+     back a grey "map data not yet available" tile rather than a 404 —
+     over open water that starts around zoom 14, which is where a shot
+     comes down. A tile that fails to load leaves the parent on screen,
+     so failing those keeps the last real imagery stretched over the
+     ground instead of the apology.
+     ──────────────────────────────────────────────────────────────── */
   maplibregl.addProtocol('nlimg', function (params, abortController) {
     var url = params.url.replace(/^nlimg:\/\//, 'https://');
-    /* Wait for the signature before judging anything, or the first
-       screenful gets through unchecked and keeps its apology tiles. */
     return learnEmptyTile()
       .then(function () { return fetch(url, { signal: abortController.signal }); })
       .then(function (r) {
@@ -787,11 +830,14 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
         return r.arrayBuffer();
       })
       .then(function (buf) {
-        if (emptyTileHash && hashBytes(buf) === emptyTileHash) {
-          /* Fail it, and the zoom level below stays on screen. */
+        var h = hashBytes(buf);
+        if (emptyHashes[h]) throw new Error('no imagery at this zoom');
+        if (buf.byteLength > 6000) return { data: buf };
+        return tileLooksEmpty(buf).then(function (empty) {
+          if (!empty) return { data: buf };
+          emptyHashes[h] = true;          /* recognise it by hash from now on */
           throw new Error('no imagery at this zoom');
-        }
-        return { data: buf };
+        });
       });
   });
 
