@@ -237,6 +237,7 @@ body.placing .maplibregl-canvas { cursor: crosshair; }
   text-shadow: 0 0 40px rgba(212,175,55,.45);
   font-variant-numeric: tabular-nums;
 }
+.cd-num.holding { color: #9a9ac8; text-shadow: 0 0 30px rgba(112,112,160,.4); }
 .cd-num.go { color: #ff9b4a; text-shadow: 0 0 60px rgba(231,76,60,.6); font-size: clamp(40px, 8vw, 86px); }
 .cd-cap { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); text-align: center; padding: 0 16px; }
 .cd-bar { width: min(320px, 60vw); height: 3px; background: rgba(212,175,55,.16); border-radius: 3px; overflow: hidden; }
@@ -734,9 +735,65 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   var ESRI_ATTR = '<a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a>, Maxar, Earthstar Geographics, USGS, NASA';
 
   function esriSource(path, maxzoom) {
-    return { type: 'raster', tiles: [ESRI + path + '/MapServer/tile/{z}/{y}/{x}'],
+    return { type: 'raster', tiles: ['nlimg://' + ESRI.replace('https://', '') + path + '/MapServer/tile/{z}/{y}/{x}'],
              tileSize: 256, minzoom: 0, maxzoom: maxzoom, attribution: ESRI_ATTR };
   }
+
+  /* ── Imagery that runs out ────────────────────────────────────────
+     Past the resolution it holds for a place, the imagery service hands
+     back a grey "map data not yet available" tile rather than a 404 —
+     over open water that starts around zoom 14, which is where a shot
+     comes down. A tile that fails to load leaves the parent on screen,
+     so recognising that grey tile and failing it keeps the last real
+     imagery stretched over the ground instead of the apology.
+
+     The signature is learned rather than hard-coded: two deep-ocean
+     tiles from opposite sides of the Pacific, far past any coverage. If
+     they come back identical, that is the placeholder. If they differ,
+     the service has changed and the filter stays off.
+     ──────────────────────────────────────────────────────────────── */
+  var emptyTileHash = null, emptyTileReady = null;
+
+  function hashBytes(buf) {
+    var b = new Uint8Array(buf), h = 2166136261;
+    for (var i = 0; i < b.length; i++) { h ^= b[i]; h = (h * 16777619) >>> 0; }
+    return b.length + ':' + h;
+  }
+
+  function learnEmptyTile() {
+    if (emptyTileReady) return emptyTileReady;
+    var probes = [
+      ESRI + 'World_Imagery/MapServer/tile/18/131072/21845',   /* mid Pacific */
+      ESRI + 'World_Imagery/MapServer/tile/18/120000/200000'   /* Bay of Bengal */
+    ];
+    emptyTileReady = Promise.all(probes.map(function (u) {
+      return fetch(u).then(function (r) { return r.arrayBuffer(); }).then(hashBytes);
+    })).then(function (h) {
+      if (h[0] === h[1]) emptyTileHash = h[0];
+    }).catch(function () { /* leave the filter off */ });
+    return emptyTileReady;
+  }
+
+  learnEmptyTile();
+
+  maplibregl.addProtocol('nlimg', function (params, abortController) {
+    var url = params.url.replace(/^nlimg:\/\//, 'https://');
+    /* Wait for the signature before judging anything, or the first
+       screenful gets through unchecked and keeps its apology tiles. */
+    return learnEmptyTile()
+      .then(function () { return fetch(url, { signal: abortController.signal }); })
+      .then(function (r) {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.arrayBuffer();
+      })
+      .then(function (buf) {
+        if (emptyTileHash && hashBytes(buf) === emptyTileHash) {
+          /* Fail it, and the zoom level below stays on screen. */
+          throw new Error('no imagery at this zoom');
+        }
+        return { data: buf };
+      });
+  });
 
   var style = {
     version: 8,
@@ -774,7 +831,10 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
       { id: 'imagery', type: 'raster', source: 'imagery' },
       { id: 'topo', type: 'raster', source: 'topo', layout: { visibility: 'none' } },
       { id: 'dark', type: 'raster', source: 'dark', layout: { visibility: 'none' } },
-      { id: 'hillshade', type: 'hillshade', source: 'dem',
+      /* The elevation tiles stop at zoom 15; past that the shading is a
+         stretched wash — a flat cream sheet over anything smooth, which
+         is exactly what the sea floor is. Let it end with its data. */
+      { id: 'hillshade', type: 'hillshade', source: 'dem', maxzoom: 15,
         paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#0a0a18',
                  'hillshade-highlight-color': '#fff4d6' } },
       { id: 'track-glow', type: 'line', source: 'track',
@@ -1931,7 +1991,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
      is already there when the camera arrives.
      ════════════════════════════════════════════════════════════ */
 
-  var countdown = { timer: null, left: 0, running: false };
+  var countdown = { timer: null, left: 0, running: false, loaded: 0 };
 
   function lngLatToTile(lng, lat, z) {
     var n = Math.pow(2, z);
@@ -1970,6 +2030,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
             if (ty < 0 || ty >= n) continue;
             for (var ti = 0; ti < templates.length; ti++) {
               var url = templates[ti]
+                .replace(/^nlimg:\/\//, 'https://')
                 .replace('{z}', z).replace('{x}', tx).replace('{y}', ty);
               if (seen[url]) continue;
               seen[url] = 1;
@@ -2015,7 +2076,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     /* Start the clock before doing any work, so a slow machine eats into
        the count rather than delaying it. Read the clock rather than
        counting ticks: loading the ground can stall a frame, and a timer
-       that catches up in a burst would sprint through the count. */
+       that caught up in a burst would sprint through the count. */
     /* Set the pace now, so it is on screen before the shot goes. */
     var fast = solution.shot.v > 12000;
     flight.rate = fast ? 0.05 : 1;
@@ -2028,15 +2089,23 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
 
     var t0 = performance.now();
     var stopPreload = null;
+    /* The count is the slower of two things: ten seconds on the clock,
+       and the ground loading. It cannot outrun the clock, so there is
+       always at least ten seconds of it, and it cannot outrun the
+       tiles, so zero lands when the last one does. */
     countdown.timer = setInterval(function () {
-      var left = Math.ceil(10 - (performance.now() - t0) / 1000);
+      var byClock = Math.ceil(10 - (performance.now() - t0) / 1000);
+      var byTiles = Math.ceil(10 * (1 - countdown.loaded));
+      var left = Math.max(byClock, byTiles);
       if (left > 0) {
         if (left !== countdown.left) {
           countdown.left = left;
           $('cd-num').textContent = String(left);
         }
+        $('cd-num').classList.toggle('holding', byTiles > byClock);
         return;
       }
+      $('cd-num').classList.remove('holding');
       clearInterval(countdown.timer);
       countdown.timer = null;
       $('cd-num').textContent = 'LAUNCH';
@@ -2053,11 +2122,17 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     /* Now the work the count exists to cover. */
     setTimeout(function () {
       if (!countdown.running) return;
+      countdown.loaded = 0;
       var urls = tilesForFlight();
-      $('cd-cap').textContent = 'Loading ' + urls.length + ' tiles along the flight path';
+      var total = urls.length;
+      if (!total) { countdown.loaded = 1; return; }
+      $('cd-cap').textContent = 'Loading ' + total + ' tiles along the flight path';
       stopPreload = preloadTiles(urls, function (frac) {
+        countdown.loaded = frac;
         $('cd-fill').style.width = Math.round(frac * 100) + '%';
-        if (frac >= 1) $('cd-cap').textContent = 'Ground loaded — standing by';
+        $('cd-cap').textContent = frac >= 1
+          ? 'Ground loaded \u2014 standing by'
+          : 'Loading the ground \u2014 ' + Math.round(frac * total) + ' of ' + total + ' tiles';
       });
 
       /* Hold the pad shot while it counts. */
