@@ -48,57 +48,154 @@ a:hover { color: var(--gold2); }
   border-radius: var(--radius);
 }
 
-/* ─── Top bar ─── */
-#topbar {
-  position: absolute; top: 14px; left: 14px; z-index: 20;
-  display: flex; align-items: center; gap: 10px; padding: 9px 14px;
-}
-#topbar .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .14em; font-size: 13px; color: var(--gold); }
-#topbar .sep { width: 1px; height: 18px; background: rgba(212,175,55,.25); }
-#topbar .tagline { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
-#topbar .build { margin-left: 8px; font-size: 10px; color: #4a4a70; letter-spacing: .08em; }
-@media (max-width: 860px) { #topbar .sep, #topbar .tagline { display: none; } }
-
-/* ─── Panels ─── */
+/* ─── The console ─── */
 #panel {
-  position: absolute; top: 68px; left: 14px; z-index: 20;
-  width: 306px; max-height: calc(100% - 178px);
-  overflow-y: auto; overscroll-behavior: contain; padding: 14px;
+  position: absolute; top: 14px; left: 14px; z-index: 20;
+  /* stop short of the flight readout in the bottom-left corner */
+  width: 330px; max-height: calc(100% - 124px);
+  display: flex; flex-direction: column;
+  overflow: hidden; padding: 0;
+  border-top: 2px solid rgba(212,175,55,.5);
 }
-#panel::-webkit-scrollbar { width: 8px; }
-#panel::-webkit-scrollbar-thumb { background: rgba(212,175,55,.22); border-radius: 8px; }
 #panel.collapsed { display: none; }
-body.flying #panel { max-height: calc(100% - 300px); }
+body.flying #panel { max-height: calc(100% - 210px); }
+#model { display: none; }
 
-.grp { margin-bottom: 14px; }
-.grp:last-child { margin-bottom: 2px; }
-.grp > h3 {
-  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
-  color: var(--muted); font-weight: 700; margin-bottom: 8px;
+/* Header strip: the one line that says whether this shot works. */
+#conhead {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 14px 8px; border-bottom: 1px solid rgba(212,175,55,.12);
+}
+#lamp {
+  width: 9px; height: 9px; border-radius: 50%; flex: none;
+  background: #4a4a70; box-shadow: 0 0 0 3px rgba(120,120,160,.12);
+  transition: background .2s, box-shadow .2s;
+}
+#lamp.yes { background: var(--green); box-shadow: 0 0 9px var(--green), 0 0 0 3px rgba(46,204,113,.16); }
+#lamp.no { background: var(--red); box-shadow: 0 0 9px var(--red), 0 0 0 3px rgba(231,76,60,.16); }
+#lamp.wait { background: var(--accent); box-shadow: 0 0 9px var(--accent), 0 0 0 3px rgba(230,126,34,.16); }
+#conhead #flag { flex: 1; }
+#conhead a {
+  color: #5c5c88; text-decoration: none; font-size: 15px; line-height: 1;
+  padding: 2px 4px; border-radius: 6px;
+}
+#conhead a:hover { color: var(--gold); background: rgba(212,175,55,.1); }
+
+/* The fade at the foot is the only cue that there is more below. */
+#conscroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+}
+#conscroll.ended { mask-image: none; -webkit-mask-image: none; }
+#conscroll::-webkit-scrollbar { width: 8px; }
+#conscroll::-webkit-scrollbar-thumb { background: rgba(212,175,55,.22); border-radius: 8px; }
+#conbody { padding: 10px 14px 0; }
+#confoot { flex: none; padding: 10px 14px 12px; border-top: 1px solid rgba(212,175,55,.12); }
+#confoot .btn.fire { margin-top: 0; }
+
+/* ─── Station rail: the knobs live behind these ─── */
+#stations {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px;
+  padding: 10px 12px 0; border-top: 1px solid rgba(212,175,55,.12);
+}
+.stn {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 7px 0 6px; cursor: pointer; font: inherit;
+  background: #0a0a16; color: var(--muted);
+  border: 1px solid rgba(212,175,55,.14); border-radius: 10px;
+  transition: all .16s;
+}
+.stn i { font-style: normal; font-size: 15px; line-height: 1; }
+.stn em {
+  font-style: normal; font-size: 8px; letter-spacing: .1em;
+  text-transform: uppercase; font-weight: 700;
+}
+.stn:hover { color: var(--gold2); border-color: rgba(212,175,55,.45); }
+.stn.on {
+  color: #0e0e1c; background: linear-gradient(180deg, var(--gold), #b8952f);
+  border-color: var(--gold); box-shadow: 0 0 12px rgba(212,175,55,.3);
 }
 
-select, input[type=text], input[type=number] {
-  width: 100%; padding: 8px 10px;
-  background: #0a0a16; color: var(--text);
-  border: 1px solid rgba(212,175,55,.2); border-radius: 10px;
-  font: inherit; font-size: 13px; outline: none;
-}
-select:focus, input[type=number]:focus { border-color: var(--gold); }
-input.invalid { border-color: var(--red); }
+#deck { padding: 10px 14px 2px; }
+.pane[hidden] { display: none; }
+.pane > .hint { margin-top: 8px; }
 
-.dims { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-.dims.three { grid-template-columns: 1fr 1fr 1fr; }
-.dims label {
-  display: block; font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--muted); font-weight: 700; white-space: nowrap;
+.knobs { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-around; }
+
+/* ─── Radial control ─── */
+.knob { flex: 1 1 88px; max-width: 150px; user-select: none; }
+.knob.wide { flex-basis: 100%; max-width: none; }
+.kdial {
+  position: relative; width: 84px; height: 84px; margin: 0 auto;
+  cursor: grab; touch-action: none; outline: none; border-radius: 50%;
 }
-.dims input, .dims select { display: block; margin-top: 4px; }
-.dims .with-unit { display: grid; grid-template-columns: 1fr auto; gap: 4px; }
-.dims .with-unit select { width: auto; padding: 8px 4px; font-size: 11px; }
+.kdial:active { cursor: grabbing; }
+.kdial:focus-visible { box-shadow: 0 0 0 2px var(--gold); }
+.kdial svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.ktrack { fill: none; stroke: rgba(212,175,55,.14); stroke-width: 6; stroke-linecap: round; }
+.kfill { fill: none; stroke: var(--gold); stroke-width: 6; stroke-linecap: round; }
+.kdial.hot .kfill { stroke: #ffdf7e; filter: drop-shadow(0 0 4px rgba(212,175,55,.7)); }
+.ktick { stroke: rgba(212,175,55,.3); stroke-width: 1.4; }
+.krose { fill: #5c5c88; font-size: 9px; font-weight: 700; text-anchor: middle; }
+.kptr { stroke: #ffdf7e; stroke-width: 3; stroke-linecap: round; }
+.kval {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; pointer-events: none;
+}
+.kval b {
+  font-size: 15px; color: var(--gold2); font-weight: 700;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.kval span { font-size: 8.5px; color: var(--muted); letter-spacing: .08em; margin-top: 2px; }
+.krow { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 3px; }
+.kstep {
+  width: 17px; height: 17px; flex: none; padding: 0; cursor: pointer;
+  background: #0a0a16; color: var(--muted); font: inherit; font-size: 12px; line-height: 1;
+  border: 1px solid rgba(212,175,55,.18); border-radius: 5px;
+}
+.kstep:hover { color: var(--gold); border-color: var(--gold); }
+.klbl {
+  font-size: 8.5px; letter-spacing: .09em; text-transform: uppercase; line-height: 1.3;
+  color: var(--muted); font-weight: 700; text-align: center; min-width: 0;
+}
+
+/* ─── Segmented selectors ─── */
+.seg { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 2px; }
+.seg button {
+  flex: 1 1 auto; padding: 6px 8px; cursor: pointer; font: inherit;
+  font-size: 10.5px; letter-spacing: .02em; white-space: nowrap;
+  background: #0a0a16; color: var(--muted);
+  border: 1px solid rgba(212,175,55,.14); border-radius: 8px;
+}
+.seg.stack button { flex: 1 1 100%; text-align: left; }
+.seg button:hover { color: var(--gold2); border-color: rgba(212,175,55,.45); }
+.seg button.on { background: rgba(212,175,55,.16); color: var(--gold); border-color: var(--gold); }
+.seg-h {
+  font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; margin: 9px 0 5px;
+}
+
+/* ─── Lamp switches ─── */
+.tgl {
+  display: flex; align-items: center; gap: 9px; padding: 5px 0;
+  font-size: 11.5px; color: var(--text); cursor: pointer;
+}
+.tgl i {
+  width: 30px; height: 15px; flex: none; border-radius: 9px; position: relative;
+  background: #0a0a16; border: 1px solid rgba(212,175,55,.2); transition: all .16s;
+}
+.tgl i::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 9px; height: 9px; border-radius: 50%; background: #4a4a70; transition: all .16s;
+}
+.tgl.on i { border-color: var(--gold); background: rgba(212,175,55,.16); }
+.tgl.on i::after { left: 17px; background: var(--gold); box-shadow: 0 0 6px var(--gold); }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
 .row label { font-size: 12.5px; color: var(--text); }
 .row .val { font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.build { font-size: 10px; color: #4a4a70; letter-spacing: .08em; }
 
 input[type=range] {
   -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin: 6px 0 2px;
@@ -130,30 +227,35 @@ input[type=range]::-moz-range-thumb { width: 15px; height: 15px; border: none; b
 }
 .btn.fire:hover:not(:disabled) { border-color: var(--red); color: #fff; }
 
-/* ─── Compass ─── */
-.compass { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin-top: 7px; }
+.btn.fire:disabled { background: #0a0a16; border-color: rgba(212,175,55,.18); }
+
+/* ─── Compass rose under the azimuth dial ─── */
+.compass { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin-top: 8px; }
 .compass button {
-  padding: 4px 0; font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  padding: 4px 0; font: inherit; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
   background: #0a0a16; color: var(--muted); cursor: pointer;
   border: 1px solid rgba(212,175,55,.16); border-radius: 6px;
 }
 .compass button:hover { color: var(--gold2); border-color: var(--gold); }
 .compass button.on { background: var(--gold); color: #0e0e1c; border-color: var(--gold); }
 
-/* ─── Verdict ─── */
-#verdict { padding: 12px 14px; margin-bottom: 12px; }
+/* ─── Verdict readout ─── */
 #flag {
-  font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
   color: var(--muted);
 }
 #flag.yes { color: var(--green); }
 #flag.no { color: var(--red); }
-#why { font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+#why { font-size: 11.5px; color: var(--muted); line-height: 1.6; }
 #why b { color: var(--text); }
-.stats { display: grid; grid-template-columns: 1fr; gap: 3px; margin-top: 10px; }
-.stats div { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
+.stats { display: grid; grid-template-columns: 1fr; gap: 0; margin-top: 9px; }
+.stats div {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  font-size: 11px; padding: 2.5px 0; border-bottom: 1px dotted rgba(212,175,55,.1);
+}
+.stats div:last-child { border-bottom: 0; }
 .stats span { color: var(--muted); }
-.stats b { color: var(--gold2); font-variant-numeric: tabular-nums; font-weight: 600; }
+.stats b { color: var(--gold2); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 
 .hint { font-size: 11px; color: var(--muted); line-height: 1.6; }
 .hint b { color: #9a9ac8; font-weight: 600; }
@@ -338,168 +440,173 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
 <div id="map"></div>
 
-<div id="topbar" class="nm">
-  <div class="logo">
-    <svg width="18" height="18" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-      <polygon points="11,1 14,8 21,8.5 16,13.5 17.5,21 11,17 4.5,21 6,13.5 1,8.5 8,8" fill="#d4af37" opacity=".9"/>
-    </svg>
-    <a href="index.html" style="color:inherit">NETHERLAYER</a>
-  </div>
-  <div class="sep"></div>
-  <div class="tagline" title="build 2026-08-05">Launch Range — <a href="globe.html">globe</a> · <a href="em-launcher.html">launcher</a><span class="build">2026-08-05</span></div>
-</div>
-
-<!-- ── Launcher panel ── -->
+<!-- ── Launch console ── -->
 <div id="panel" class="nm">
 
-  <div id="verdict" class="nm" style="background:rgba(10,10,22,.6)">
-    <div id="flag">—</div>
+  <div id="conhead">
+    <span id="lamp"></span>
+    <span id="flag">—</span>
+    <a href="globe.html" title="Globe viewer">◍</a>
+    <a href="em-launcher.html" title="Launcher calculator">⚡</a>
+  </div>
+
+  <div id="conscroll">
+  <div id="conbody">
     <div id="why">Pick a pad, then check the numbers.</div>
     <div class="stats" id="stats"></div>
   </div>
 
-  <button class="btn fire" id="fire" disabled>▲ LAUNCH</button>
-
-  <div class="grp" style="margin-top:14px">
-    <h3>Launch pad</h3>
-    <div class="pad-line" id="padline">No pad selected</div>
-    <button class="btn" id="pick">◎ Click the terrain to set the pad</button>
-    <div class="dims" style="margin-top:8px">
-      <label>Elevation angle
-        <input type="number" id="angle" value="30" min="1" max="89" step="1"/>
-      </label>
-      <label>Azimuth
-        <input type="number" id="azimuth" value="90" min="0" max="359" step="1"/>
-      </label>
-    </div>
-    <div class="row" style="padding-bottom:0">
-      <label for="azdial">Rotate the aim</label>
-      <span class="val" id="azlbl">090° · E</span>
-    </div>
-    <input type="range" id="azdial" min="0" max="359" step="1" value="90"/>
-    <div class="compass" id="compass">
-      <button type="button" data-az="0">N</button>
-      <button type="button" data-az="45">NE</button>
-      <button type="button" data-az="90">E</button>
-      <button type="button" data-az="135">SE</button>
-      <button type="button" data-az="180">S</button>
-      <button type="button" data-az="225">SW</button>
-      <button type="button" data-az="270">W</button>
-      <button type="button" data-az="315">NW</button>
-    </div>
-    <p class="hint" id="padhint">&nbsp;</p>
+  <div id="stations">
+    <button type="button" class="stn on" data-pane="p-pad"><i>◎</i><em>Pad</em></button>
+    <button type="button" class="stn" data-pane="p-rails"><i>▤</i><em>Rails</em></button>
+    <button type="button" class="stn" data-pane="p-bank"><i>⚡</i><em>Bank</em></button>
+    <button type="button" class="stn" data-pane="p-round"><i>➤</i><em>Round</em></button>
+    <button type="button" class="stn" data-pane="p-target"><i>⌖</i><em>Target</em></button>
+    <button type="button" class="stn" data-pane="p-scene"><i>☰</i><em>Scene</em></button>
   </div>
 
-  <div class="grp">
-    <h3>Projectile</h3>
-    <div class="dims">
-      <label>Payload
-        <span class="with-unit">
-          <input type="number" id="mPay" value="100" min="0" step="any"/>
-          <select id="mPayUnit"><option value="1">kg</option><option value="1000">t</option></select>
-        </span>
-      </label>
-      <label>Sabot (kg)
-        <input type="number" id="mSabot" value="20" min="0" step="any"/>
-      </label>
-    </div>
-    <div class="dims">
-      <label>Diameter (m)
-        <input type="number" id="dPay" value="0.3" min="0" step="any"/>
-      </label>
-      <label>Nose
-        <select id="shape"></select>
-      </label>
-    </div>
-    <p class="hint" id="dPayHint">&nbsp;</p>
+  <div id="deck">
+    <section class="pane" id="p-pad">
+      <div class="pad-line" id="padline">No pad selected</div>
+      <button class="btn" id="pick">◎ Set the pad on the terrain</button>
+      <div class="knobs" style="margin-top:9px">
+        <div class="knob" data-bind="angle" data-min="1" data-max="89" data-step="1"
+             data-label="Elevation" data-unit="deg"></div>
+        <div class="knob" data-bind="azdial" data-min="0" data-max="359" data-step="1"
+             data-label="Azimuth" data-unit="" data-wrap="1" data-rose="1" data-fmt="az"></div>
+      </div>
+      <div class="compass" id="compass">
+        <button type="button" data-az="0">N</button>
+        <button type="button" data-az="45">NE</button>
+        <button type="button" data-az="90">E</button>
+        <button type="button" data-az="135">SE</button>
+        <button type="button" data-az="180">S</button>
+        <button type="button" data-az="225">SW</button>
+        <button type="button" data-az="270">W</button>
+        <button type="button" data-az="315">NW</button>
+      </div>
+      <p class="hint" id="padhint">&nbsp;</p>
+    </section>
+
+    <section class="pane" id="p-rails" hidden>
+      <div class="knobs">
+        <div class="knob" data-bind="rail" data-min="1" data-max="10000" data-step="1"
+             data-label="Length" data-unit="m"></div>
+        <div class="knob" data-bind="gap" data-min="0.05" data-max="3" data-step="0.01"
+             data-label="Bore gap" data-unit="m" data-dp="2"></div>
+        <div class="knob" data-bind="railH" data-min="0.05" data-max="3" data-step="0.01"
+             data-label="Rail height" data-unit="m" data-dp="2"></div>
+      </div>
+      <p class="hint" id="gapHint">&nbsp;</p>
+    </section>
+
+    <section class="pane" id="p-bank" hidden>
+      <div class="knobs">
+        <div class="knob" data-bind="bankN" data-min="1" data-max="200" data-step="1"
+             data-label="Modules" data-unit="banks"></div>
+        <div class="knob" data-bind="volt" data-min="1" data-max="300" data-step="1"
+             data-label="Charge" data-unit="kV"></div>
+      </div>
+      <div class="seg-h">Module size</div>
+      <div class="seg" data-bind="bankSize"></div>
+      <p class="hint" id="bankmix">&nbsp;</p>
+      <div class="seg-h">Dielectric</div>
+      <div class="seg" data-bind="capType"></div>
+      <div class="knobs" style="margin-top:8px">
+        <div class="knob" data-bind="res" data-min="1" data-max="5000" data-step="1"
+             data-label="Resistance" data-unit="uohm"></div>
+        <div class="knob" data-bind="ind" data-min="1" data-max="5000" data-step="1"
+             data-label="Inductance" data-unit="uH"></div>
+      </div>
+      <p class="hint" id="bankHint">&nbsp;</p>
+    </section>
+
+    <section class="pane" id="p-round" hidden>
+      <div class="knobs">
+        <div class="knob" data-bind="mPay" data-min="1" data-max="10000" data-step="1"
+             data-label="Payload" data-unit="kg"></div>
+        <div class="knob" data-bind="mSabot" data-min="0" data-max="2000" data-step="1"
+             data-label="Sabot" data-unit="kg"></div>
+        <div class="knob" data-bind="dPay" data-min="0.05" data-max="2" data-step="0.01"
+             data-label="Diameter" data-unit="m" data-dp="2"></div>
+      </div>
+      <div class="seg-h">Nose</div>
+      <div class="seg" data-bind="shape"></div>
+      <p class="hint" id="dPayHint">&nbsp;</p>
+    </section>
+
+    <section class="pane" id="p-target" hidden>
+      <div class="knobs">
+        <div class="knob wide" data-bind="alt" data-min="10" data-max="2000" data-step="5"
+             data-label="Target altitude" data-unit="km"></div>
+      </div>
+      <div class="seg-h">Standard orbits</div>
+      <div class="seg stack" data-bind="dest"></div>
+    </section>
+
+    <section class="pane" id="p-scene" hidden>
+      <div class="seg-h">Basemap</div>
+      <div class="seg" data-bind="basemap"></div>
+      <div style="margin-top:8px">
+        <label class="tgl" data-bind="showtrack"><i></i>Ground track</label>
+        <label class="tgl" data-bind="showcities"><i></i>City markers</label>
+        <label class="tgl" data-bind="showbuildings"><i></i>3D buildings at the target</label>
+      </div>
+      <p class="hint" style="margin-top:8px">
+        Terrain is drawn at true vertical scale, so the pad height the physics
+        uses is the height you see. <span class="build">Build 2026-08-05</span>
+      </p>
+    </section>
+  </div>
   </div>
 
-  <div class="grp">
-    <h3>Target</h3>
-    <select id="dest"></select>
-    <div class="dims" style="margin-top:8px">
-      <label>Altitude (km)
-        <input type="number" id="alt" value="200" min="0" step="any"/>
-      </label>
-      <label>Rail length
-        <span class="with-unit">
-          <input type="number" id="rail" value="1000" min="0" step="any"/>
-          <select id="railUnit"><option value="1">m</option><option value="1000">km</option></select>
-        </span>
-      </label>
-    </div>
-  </div>
-
-  <div class="grp">
-    <h3>Rails</h3>
-    <div class="dims">
-      <label>Bore gap (m)
-        <input type="number" id="gap" value="0.5" min="0" step="any"/>
-      </label>
-      <label>Rail height (m)
-        <input type="number" id="railH" value="0.5" min="0" step="any"/>
-      </label>
-    </div>
-    <p class="hint" id="gapHint">&nbsp;</p>
-  </div>
-
-  <div class="grp">
-    <h3>Capacitor bank</h3>
-    <select id="capType"></select>
-    <div class="dims" style="margin-top:8px">
-      <label>Capacitance
-        <span class="with-unit">
-          <input type="number" id="cap" value="20" min="0" step="any"/>
-          <select id="capUnit"><option value="1">F</option><option value="0.001">mF</option><option value="0.000001">µF</option></select>
-        </span>
-      </label>
-      <label>Voltage
-        <span class="with-unit">
-          <input type="number" id="volt" value="30" min="0" step="any"/>
-          <select id="voltUnit"><option value="1000">kV</option><option value="1">V</option><option value="1000000">MV</option></select>
-        </span>
-      </label>
-    </div>
-    <div class="dims">
-      <label>Resistance
-        <span class="with-unit">
-          <input type="number" id="res" value="100" min="0" step="any"/>
-          <select id="resUnit"><option value="0.000001">µΩ</option><option value="0.001">mΩ</option><option value="1">Ω</option></select>
-        </span>
-      </label>
-      <label>Inductance (µH)
-        <input type="number" id="ind" value="500" min="0" step="any"/>
-      </label>
-    </div>
-    <p class="hint" id="bankHint">&nbsp;</p>
-  </div>
-
-  <div class="grp">
-    <h3>Scene</h3>
-    <select id="basemap">
-      <option value="imagery">Satellite imagery</option>
-      <option value="topo">Topographic</option>
-      <option value="dark">Dark carto</option>
-    </select>
-    <div class="row" style="margin-top:6px">
-      <label for="showtrack">Ground track</label>
-      <span><input type="checkbox" id="showtrack" checked/></span>
-    </div>
-    <div class="row">
-      <label for="showcities">City markers</label>
-      <span><input type="checkbox" id="showcities" checked/></span>
-    </div>
-    <div class="row">
-      <label for="showbuildings">3D buildings at the target</label>
-      <span><input type="checkbox" id="showbuildings" checked/></span>
-    </div>
-    <p class="hint" style="margin-top:6px">
-      Terrain is drawn at true vertical scale here, so the pad height the physics
-      uses is the height you see.
-    </p>
+  <div id="confoot">
+    <button class="btn fire" id="fire" disabled>▲ LAUNCH</button>
   </div>
 </div>
-<div id="panel-btn" class="nm" title="Show the launcher">☰</div>
+<div id="panel-btn" class="nm" title="Show the console">☰</div>
+
+<!-- ── The numbers the console turns. The solver reads these. ── -->
+<div id="model">
+  <input type="number" id="angle" value="30" min="1" max="89" step="1"/>
+  <input type="number" id="azimuth" value="90" min="0" max="359" step="1"/>
+  <input type="range" id="azdial" min="0" max="359" step="1" value="90"/>
+  <span id="azlbl"></span>
+  <input type="number" id="mPay" value="100" min="0" step="any"/>
+  <select id="mPayUnit"><option value="1">kg</option><option value="1000">t</option></select>
+  <input type="number" id="mSabot" value="20" min="0" step="any"/>
+  <input type="number" id="dPay" value="0.3" min="0" step="any"/>
+  <select id="shape"></select>
+  <select id="dest"></select>
+  <input type="number" id="alt" value="200" min="0" step="any"/>
+  <input type="number" id="rail" value="1000" min="0" step="any"/>
+  <select id="railUnit"><option value="1">m</option><option value="1000">km</option></select>
+  <input type="number" id="gap" value="0.5" min="0" step="any"/>
+  <input type="number" id="railH" value="0.5" min="0" step="any"/>
+  <select id="capType"></select>
+  <input type="number" id="bankN" value="40" min="1" step="1"/>
+  <select id="bankSize">
+    <option value="0.01">10 mF</option>
+    <option value="0.1">100 mF</option>
+    <option value="0.5" selected>500 mF</option>
+    <option value="2">2 F</option>
+  </select>
+  <input type="number" id="cap" value="20" min="0" step="any"/>
+  <select id="capUnit"><option value="1">F</option><option value="0.001">mF</option><option value="0.000001">µF</option></select>
+  <input type="number" id="volt" value="30" min="0" step="any"/>
+  <select id="voltUnit"><option value="1000">kV</option><option value="1">V</option><option value="1000000">MV</option></select>
+  <input type="number" id="res" value="100" min="0" step="any"/>
+  <select id="resUnit"><option value="0.000001">µΩ</option><option value="0.001">mΩ</option><option value="1">Ω</option></select>
+  <input type="number" id="ind" value="500" min="0" step="any"/>
+  <select id="basemap">
+    <option value="imagery">Satellite imagery</option>
+    <option value="topo">Topographic</option>
+    <option value="dark">Dark carto</option>
+  </select>
+  <input type="checkbox" id="showtrack" checked/>
+  <input type="checkbox" id="showcities" checked/>
+  <input type="checkbox" id="showbuildings" checked/>
+</div>
 
 <!-- ── Right-hand rail: what it costs, then the altitude chart ── -->
 <div id="rightrail">
@@ -619,11 +726,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      Capacitors are bought by the joule, not by the farad, because the farads
      a dielectric will give you depend on how many volts you ask it to hold. */
   var CAPS = [
-    { name: 'Film — metallised polypropylene', jkg: 1500, jprice: 0.45, note: 'The pulsed-power workhorse. Low ESR, survives full discharge in milliseconds.' },
-    { name: 'Film — oil-impregnated paper', jkg: 900, jprice: 0.80, note: 'Older pulsed-power technology. Heavier, but tolerant of brutal duty.' },
-    { name: 'Aluminium electrolytic', jkg: 300, jprice: 0.09, note: 'Cheap and dense in farads, but ESR and inductance fight a fast discharge.' },
-    { name: 'Supercapacitor (EDLC)', jkg: 18000, jprice: 0.004, note: 'Superb energy density, hopeless pulse. Seconds, not milliseconds.' },
-    { name: 'Ceramic (class 2)', jkg: 100, jprice: 30, note: 'Fast and low-loss, but the energy density makes a bank enormous.' }
+    { name: 'Film — metallised polypropylene', short: 'Metallised film', jkg: 1500, jprice: 0.45, note: 'The pulsed-power workhorse. Low ESR, survives full discharge in milliseconds.' },
+    { name: 'Film — oil-impregnated paper', short: 'Oil-paper film', jkg: 900, jprice: 0.80, note: 'Older pulsed-power technology. Heavier, but tolerant of brutal duty.' },
+    { name: 'Aluminium electrolytic', short: 'Electrolytic', jkg: 300, jprice: 0.09, note: 'Cheap and dense in farads, but ESR and inductance fight a fast discharge.' },
+    { name: 'Supercapacitor (EDLC)', short: 'Supercapacitor', jkg: 18000, jprice: 0.004, note: 'Superb energy density, hopeless pulse. Seconds, not milliseconds.' },
+    { name: 'Ceramic (class 2)', short: 'Ceramic', jkg: 100, jprice: 30, note: 'Fast and low-loss, but the energy density makes a bank enormous.' }
   ];
   /* ════════════════════════════════════════════════════════════
      WHAT IT COSTS
@@ -1894,9 +2001,13 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     $('flag').textContent = text;
     $('flag').className = kind;
     $('why').innerHTML = why;
+    $('lamp').className = kind || 'wait';
   }
 
   function solve() {
+    /* Whatever moved the numbers — a dial, a preset, aiming at a city —
+       the console reads them back rather than assuming it knows. */
+    if (window.__refreshControls) window.__refreshControls();
     var shape = SHAPES[Number($('shape').value)];
     var capT = CAPS[Number($('capType').value)];
 
@@ -3059,6 +3170,226 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     flight.t = Number(e.target.value) / 1000 * solution.dur;
   });
 
+  /* ════════════════════════════════════════════════════════════
+     THE CONSOLE
+     Radial controls, segmented selectors and lamp switches over the
+     fields in #model. Everything here writes to one of those fields
+     and lets the ordinary listeners do the work, so the solver never
+     learns that the dials exist.
+     ════════════════════════════════════════════════════════════ */
+  var knobs = [];
+  var UNITS = { deg: '°', uohm: 'µΩ', uH: 'µH' };
+  var ROSE = [['N', 0], ['E', 90], ['S', 180], ['W', 270]];
+
+  function polar(cx, cy, r, deg) {
+    var a = deg * Math.PI / 180;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  }
+  function arcPath(r, a0, a1) {
+    var p0 = polar(50, 50, r, a0), p1 = polar(50, 50, r, a1);
+    return 'M' + p0.x.toFixed(2) + ' ' + p0.y.toFixed(2) + 'A' + r + ' ' + r + ' 0 ' +
+           (Math.abs(a1 - a0) > 180 ? 1 : 0) + ' ' + (a1 >= a0 ? 1 : 0) + ' ' +
+           p1.x.toFixed(2) + ' ' + p1.y.toFixed(2);
+  }
+  function snap(k, v) {
+    var span = k.max - k.min + (k.wrap ? k.step : 0);
+    if (k.wrap) v = k.min + (((v - k.min) % span) + span) % span;
+    else v = Math.max(k.min, Math.min(k.max, v));
+    return Number((Math.round(v / k.step) * k.step).toFixed(6));
+  }
+  function knobValue(k) {
+    var v = parseFloat(k.input.value);
+    return snap(k, isFinite(v) ? v : k.min);
+  }
+  function knobText(k, v) {
+    if (k.fmt === 'az') return String(Math.round(v)).padStart(3, '0') + '°';
+    return k.dp ? v.toFixed(k.dp) : String(Math.round(v));
+  }
+
+  function drawKnob(k) {
+    var v = knobValue(k);
+    var span = k.max - k.min + (k.wrap ? k.step : 0);
+    var t = Math.max(0, Math.min(1, (v - k.min) / span));
+    var a = k.a0 + t * k.sweep;
+    k.fill.setAttribute('d', t <= 0.002 ? 'M0 0' : arcPath(36, k.a0, a));
+    /* The pointer rides the rim: the middle of the dial belongs to the number. */
+    var tip = polar(50, 50, 32, a), heel = polar(50, 50, 25, a);
+    k.ptr.setAttribute('x1', heel.x.toFixed(1)); k.ptr.setAttribute('y1', heel.y.toFixed(1));
+    k.ptr.setAttribute('x2', tip.x.toFixed(1)); k.ptr.setAttribute('y2', tip.y.toFixed(1));
+    var s = knobText(k, v);
+    if (k.fmt === 'az') k.unit.textContent = COMPASS[Math.round(v / 22.5) % 16];
+    k.num.textContent = s;
+    k.num.style.fontSize = s.length > 5 ? '11.5px' : s.length > 4 ? '13px' : '15px';
+    k.dial.setAttribute('aria-valuenow', String(v));
+    k.dial.setAttribute('aria-valuetext', s + ' ' + k.unit.textContent);
+  }
+
+  /* Turning a dial re-solves the whole flight, so hold it to one solve
+     per pause rather than one per pixel — the same trick the aim uses. */
+  function setKnob(k, v, dragging) {
+    v = snap(k, v);
+    if (Number(k.input.value) === v) { drawKnob(k); return; }
+    k.input.value = String(v);
+    drawKnob(k);
+    clearTimeout(k.timer);
+    if (dragging) k.timer = setTimeout(function () { fireInput(k.input); }, 45);
+    else fireInput(k.input);
+  }
+  function fireInput(el) { el.dispatchEvent(new Event('input', { bubbles: true })); }
+
+  function makeKnob(el) {
+    var k = {
+      el: el, input: $(el.dataset.bind),
+      min: parseFloat(el.dataset.min), max: parseFloat(el.dataset.max),
+      step: parseFloat(el.dataset.step), dp: Number(el.dataset.dp || 0),
+      wrap: el.dataset.wrap === '1', fmt: el.dataset.fmt || '', timer: null
+    };
+    k.a0 = k.wrap ? -90 : 135;
+    k.sweep = k.wrap ? 360 : 270;
+
+    var ticks = '', n = k.wrap ? 24 : 21, i, deg, p1, p2;
+    for (i = 0; i < n; i++) {
+      deg = k.a0 + (k.wrap ? i / n : i / (n - 1)) * k.sweep;
+      p1 = polar(50, 50, 47, deg);
+      p2 = polar(50, 50, i % 5 === 0 ? 41 : 44, deg);
+      ticks += '<line class="ktick" x1="' + p1.x.toFixed(1) + '" y1="' + p1.y.toFixed(1) +
+               '" x2="' + p2.x.toFixed(1) + '" y2="' + p2.y.toFixed(1) + '"/>';
+    }
+    var rose = '';
+    if (el.dataset.rose === '1') {
+      ROSE.forEach(function (r) {
+        var p = polar(50, 53, 22, -90 + r[1]);
+        rose += '<text class="krose" x="' + p.x.toFixed(1) + '" y="' + p.y.toFixed(1) + '">' + r[0] + '</text>';
+      });
+    }
+    el.innerHTML =
+      '<div class="kdial" tabindex="0" role="slider" aria-label="' + el.dataset.label + '">' +
+        '<svg viewBox="0 0 100 100">' + ticks + rose +
+        '<path class="ktrack" d="' + arcPath(36, k.a0, k.a0 + k.sweep * (k.wrap ? 0.9999 : 1)) + '"/>' +
+        '<path class="kfill"/><line class="kptr"/></svg>' +
+        '<div class="kval"><b></b><span></span></div></div>' +
+      '<div class="krow"><button type="button" class="kstep" data-d="-1">&minus;</button>' +
+      '<div class="klbl">' + el.dataset.label + '</div>' +
+      '<button type="button" class="kstep" data-d="1">+</button></div>';
+
+    k.dial = el.querySelector('.kdial');
+    k.fill = el.querySelector('.kfill');
+    k.ptr = el.querySelector('.kptr');
+    k.num = el.querySelector('.kval b');
+    k.unit = el.querySelector('.kval span');
+    var u = el.dataset.unit || '';
+    k.unit.textContent = UNITS[u] !== undefined ? UNITS[u] : u;
+
+    /* Turning: follow the angle round the hub, so the dial behaves like
+       a dial rather than jumping to wherever the pointer landed. */
+    var turning = false, lastAng = 0, from = 0, turned = 0;
+    function angleOf(e) {
+      var r = k.dial.getBoundingClientRect();
+      return Math.atan2(e.clientY - (r.top + r.height / 2),
+                        e.clientX - (r.left + r.width / 2)) * 180 / Math.PI;
+    }
+    k.dial.addEventListener('pointerdown', function (e) {
+      turning = true; turned = 0; from = knobValue(k); lastAng = angleOf(e);
+      k.dial.setPointerCapture(e.pointerId);
+      k.dial.classList.add('hot');
+      e.preventDefault();
+    });
+    k.dial.addEventListener('pointermove', function (e) {
+      if (!turning) return;
+      var a = angleOf(e), d = a - lastAng;
+      while (d > 180) d -= 360;
+      while (d < -180) d += 360;
+      lastAng = a;
+      turned += d * (e.shiftKey ? 0.12 : 1);      /* shift for a fine touch */
+      setKnob(k, from + turned / k.sweep * (k.max - k.min), true);
+    });
+    function letGo(e) {
+      if (!turning) return;
+      turning = false;
+      k.dial.classList.remove('hot');
+      try { k.dial.releasePointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+      clearTimeout(k.timer);
+      fireInput(k.input);
+    }
+    k.dial.addEventListener('pointerup', letGo);
+    k.dial.addEventListener('pointercancel', letGo);
+    k.dial.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      setKnob(k, knobValue(k) + (e.deltaY < 0 ? 1 : -1) * k.step * (e.shiftKey ? 10 : 1), true);
+    }, { passive: false });
+    k.dial.addEventListener('keydown', function (e) {
+      var d = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      setKnob(k, knobValue(k) + d * k.step);
+    });
+    Array.prototype.forEach.call(el.querySelectorAll('.kstep'), function (b) {
+      b.addEventListener('click', function () {
+        setKnob(k, knobValue(k) + Number(b.dataset.d) * k.step);
+      });
+    });
+
+    knobs.push(k);
+    drawKnob(k);
+  }
+
+  function makeSeg(el) {
+    var sel = $(el.dataset.bind);
+    Array.prototype.forEach.call(sel.options, function (o) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = o.dataset.short || o.textContent;
+      b.title = o.textContent;
+      b.dataset.v = o.value;
+      b.addEventListener('click', function () {
+        sel.value = o.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        refreshControls();
+      });
+      el.appendChild(b);
+    });
+  }
+
+  function makeToggle(el) {
+    var box = $(el.dataset.bind);
+    el.addEventListener('click', function (e) {
+      e.preventDefault();
+      box.checked = !box.checked;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+      refreshControls();
+    });
+  }
+
+  /* Anything can move the numbers — aiming at a city, picking a preset
+     orbit — so the console reads them back rather than assuming. */
+  function refreshControls() {
+    for (var i = 0; i < knobs.length; i++) drawKnob(knobs[i]);
+    Array.prototype.forEach.call(document.querySelectorAll('.seg[data-bind]'), function (el) {
+      var v = $(el.dataset.bind).value;
+      Array.prototype.forEach.call(el.children, function (b) {
+        b.classList.toggle('on', b.dataset.v === v);
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.tgl[data-bind]'), function (el) {
+      el.classList.toggle('on', $(el.dataset.bind).checked);
+    });
+  }
+  window.__refreshControls = refreshControls;
+
+  /* Farads are ordered as a count of modules, which is how a bank is
+     actually built, and the solver is handed the total. */
+  function recomputeBank() {
+    var n = Math.max(1, Math.round(Number($('bankN').value) || 1));
+    var size = parseFloat($('bankSize').value);
+    var total = n * size;
+    $('capUnit').value = '1';
+    $('cap').value = String(Number(total.toPrecision(10)));
+    $('bankmix').innerHTML = n + ' module' + (n === 1 ? '' : 's') + ' × <b>' +
+      $('bankSize').options[$('bankSize').selectedIndex].textContent +
+      '</b> &nbsp;=&nbsp; <b>' + sig(total, 4) + ' F</b>';
+    solve();
+  }
+
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.key === 'Escape') {
@@ -3075,7 +3406,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      ════════════════════════════════════════════════════════════ */
 
   SHAPES.forEach(function (s, i) { $('shape').add(new Option(s.name, String(i))); });
-  CAPS.forEach(function (c, i) { $('capType').add(new Option(c.name, String(i))); });
+  CAPS.forEach(function (c, i) {
+    var o = new Option(c.name, String(i));
+    o.dataset.short = c.short;        /* the console has less room than the note */
+    $('capType').add(o);
+  });
   DESTS.forEach(function (d, i) { $('dest').add(new Option(d.name, String(i))); });
   $('shape').value = '0'; $('capType').value = '0'; $('dest').value = '2';
 
@@ -3093,6 +3428,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     for (var i = 0; i < kids.length; i++) {
       kids[i].classList.toggle('on', Number(kids[i].dataset.az) === a);
     }
+    if (window.__refreshControls) window.__refreshControls();
   }
   /* Dragging the dial re-solves the whole flight, so hold it to one
      solve per pause rather than one per pixel. A timer, not a frame
@@ -3129,6 +3465,39 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       map.setLayoutProperty(id, 'visibility', id === e.target.value ? 'visible' : 'none');
     });
   });
+
+  /* The console goes on last: its selectors are built from the option
+     lists above, and its switches fire into the listeners above. */
+  Array.prototype.forEach.call($('stations').children, function (b) {
+    b.addEventListener('click', function () {
+      Array.prototype.forEach.call($('stations').children, function (o) {
+        o.classList.toggle('on', o === b);
+      });
+      Array.prototype.forEach.call($('deck').children, function (p) {
+        p.hidden = p.id !== b.dataset.pane;
+      });
+      $('conscroll').scrollTop = $('conscroll').scrollHeight;
+      fadeFoot();
+    });
+  });
+  function fadeFoot() {
+    var s = $('conscroll');
+    s.classList.toggle('ended', s.scrollTop + s.clientHeight >= s.scrollHeight - 2);
+  }
+  $('conscroll').addEventListener('scroll', fadeFoot);
+  window.addEventListener('resize', fadeFoot);
+  Array.prototype.forEach.call(document.querySelectorAll('.seg[data-bind]'), makeSeg);
+  Array.prototype.forEach.call(document.querySelectorAll('.tgl[data-bind]'), makeToggle);
+  Array.prototype.forEach.call(document.querySelectorAll('.knob[data-bind]'), makeKnob);
+  $('bankN').addEventListener('input', recomputeBank);
+  $('bankSize').addEventListener('change', recomputeBank);
+  $('railUnit').value = '1';         /* the dials count in metres, */
+  $('voltUnit').value = '1000';      /* kilovolts, kilograms and */
+  $('mPayUnit').value = '1';         /* microhms, so the units */
+  $('resUnit').value = '0.000001';   /* stay off the panel */
+  recomputeBank();
+  refreshControls();
+  fadeFoot();
 
   var panel = $('panel'), panelBtn = $('panel-btn');
   panelBtn.addEventListener('click', function () {
