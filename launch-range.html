@@ -223,6 +223,26 @@ body:not(.flying) #flightbar { display: none; }
 #panel-btn.show { display: flex; }
 body.placing .maplibregl-canvas { cursor: crosshair; }
 
+/* ─── City in the crosshairs ─── */
+#aimchip {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 21; display: flex; align-items: center; gap: 10px;
+  padding: 7px 8px 7px 14px; max-width: min(560px, calc(100% - 28px));
+}
+body.flying #aimchip, body.placing #aimchip { display: none; }
+#aimchip .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #6bb8ff; flex: none;
+  box-shadow: 0 0 10px 2px rgba(107,184,255,.75);
+}
+#aimchip .who { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; color: var(--text); white-space: nowrap; }
+#aimchip .how { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#aimchip .btn { width: auto; padding: 6px 12px; font-size: 11.5px; }
+@media (max-width: 720px) {
+  #aimchip { top: 62px; padding: 6px 7px 6px 11px; gap: 7px; }
+  #aimchip .who { font-size: 11.5px; }
+  #aimchip .how { font-size: 10.5px; }
+}
+
 /* ─── Countdown ─── */
 #countdown {
   position: absolute; inset: 0; z-index: 34;
@@ -431,6 +451,10 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
       <label for="showtrack">Ground track</label>
       <span><input type="checkbox" id="showtrack" checked/></span>
     </div>
+    <div class="row">
+      <label for="showcities">City markers</label>
+      <span><input type="checkbox" id="showcities" checked/></span>
+    </div>
     <p class="hint" style="margin-top:6px">
       Terrain is drawn at true vertical scale here, so the pad height the physics
       uses is the height you see.
@@ -480,6 +504,13 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   <div class="cd-cap" id="cd-cap">Loading the ground along the flight path</div>
   <div class="cd-bar"><i id="cd-fill"></i></div>
   <button class="btn" id="cd-skip" style="width:auto;padding:7px 18px">Skip the count</button>
+</div>
+
+<div id="aimchip" class="nm" hidden>
+  <span class="dot"></span>
+  <span class="who" id="aim-who">—</span>
+  <span class="how" id="aim-how">—</span>
+  <button class="btn" id="aim-go">Aim here</button>
 </div>
 
 <div id="toast" class="nm"></div>
@@ -726,6 +757,88 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
   }
   function fmtLat(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'N' : 'S'); }
   function fmtLon(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'E' : 'W'); }
+
+  /* ════════════════════════════════════════════════════════════
+     CITIES
+     Somewhere to aim. Every national capital of consequence plus the
+     largest metropolitan areas on each continent — enough that any
+     bearing off the pad finds something, without crowding the globe.
+     ════════════════════════════════════════════════════════════ */
+  var CITIES = [
+    ['Tokyo','JP',35.69,139.69], ['Delhi','IN',28.61,77.21], ['Shanghai','CN',31.23,121.47],
+    ['Dhaka','BD',23.81,90.41], ['São Paulo','BR',-23.55,-46.63], ['Cairo','EG',30.04,31.24],
+    ['Mexico City','MX',19.43,-99.13], ['Beijing','CN',39.90,116.41], ['Mumbai','IN',19.08,72.88],
+    ['Osaka','JP',34.69,135.50], ['Karachi','PK',24.86,67.01], ['Chongqing','CN',29.56,106.55],
+    ['Istanbul','TR',41.01,28.98], ['Buenos Aires','AR',-34.60,-58.38], ['Kolkata','IN',22.57,88.36],
+    ['Lagos','NG',6.52,3.38], ['Kinshasa','CD',-4.44,15.27], ['Manila','PH',14.60,120.98],
+    ['Tianjin','CN',39.13,117.20], ['Guangzhou','CN',23.13,113.26], ['Rio de Janeiro','BR',-22.91,-43.17],
+    ['Lahore','PK',31.55,74.34], ['Bangalore','IN',12.97,77.59], ['Shenzhen','CN',22.54,114.06],
+    ['Moscow','RU',55.76,37.62], ['Chennai','IN',13.08,80.27], ['Bogotá','CO',4.71,-74.07],
+    ['Jakarta','ID',-6.21,106.85], ['Lima','PE',-12.05,-77.04], ['Paris','FR',48.86,2.35],
+    ['Bangkok','TH',13.76,100.50], ['Hyderabad','IN',17.39,78.49], ['Seoul','KR',37.57,126.98],
+    ['Nagoya','JP',35.18,136.91], ['London','GB',51.51,-0.13], ['Tehran','IR',35.69,51.39],
+    ['Chicago','US',41.88,-87.63], ['Chengdu','CN',30.57,104.07], ['Nanjing','CN',32.06,118.80],
+    ['Wuhan','CN',30.59,114.31], ['Ho Chi Minh City','VN',10.82,106.63], ['Luanda','AO',-8.84,13.23],
+    ['Ahmedabad','IN',23.02,72.57], ['Kuala Lumpur','MY',3.14,101.69], ['Xi\u2019an','CN',34.34,108.94],
+    ['Hong Kong','HK',22.32,114.17], ['Dongguan','CN',23.02,113.75], ['Hangzhou','CN',30.27,120.15],
+    ['Foshan','CN',23.02,113.12], ['Shenyang','CN',41.80,123.43], ['Riyadh','SA',24.71,46.68],
+    ['Baghdad','IQ',33.32,44.36], ['Santiago','CL',-33.45,-70.67], ['Surat','IN',21.17,72.83],
+    ['Madrid','ES',40.42,-3.70], ['Suzhou','CN',31.30,120.59], ['Pune','IN',18.52,73.86],
+    ['Harbin','CN',45.80,126.53], ['Houston','US',29.76,-95.37], ['Dallas','US',32.78,-96.80],
+    ['Toronto','CA',43.65,-79.38], ['Dar es Salaam','TZ',-6.79,39.21], ['Miami','US',25.76,-80.19],
+    ['Belo Horizonte','BR',-19.92,-43.94], ['Singapore','SG',1.35,103.82], ['Philadelphia','US',39.95,-75.17],
+    ['Atlanta','US',33.75,-84.39], ['Fukuoka','JP',33.59,130.40], ['Khartoum','SD',15.50,32.56],
+    ['Barcelona','ES',41.39,2.17], ['Johannesburg','ZA',-26.20,28.05], ['Saint Petersburg','RU',59.93,30.34],
+    ['Qingdao','CN',36.07,120.38], ['Dalian','CN',38.91,121.61], ['Washington','US',38.91,-77.04],
+    ['Yangon','MM',16.87,96.20], ['Alexandria','EG',31.20,29.92], ['Jinan','CN',36.65,117.12],
+    ['Guadalajara','MX',20.67,-103.35], ['Boston','US',42.36,-71.06], ['Sydney','AU',-33.87,151.21],
+    ['Melbourne','AU',-37.81,144.96], ['Brisbane','AU',-27.47,153.03], ['Perth','AU',-31.95,115.86],
+    ['Adelaide','AU',-34.93,138.60], ['Auckland','NZ',-36.85,174.76], ['Wellington','NZ',-41.29,174.78],
+    ['Berlin','DE',52.52,13.40], ['Rome','IT',41.90,12.50], ['Kyiv','UA',50.45,30.52],
+    ['Vienna','AT',48.21,16.37], ['Warsaw','PL',52.23,21.01], ['Bucharest','RO',44.43,26.10],
+    ['Budapest','HU',47.50,19.04], ['Amsterdam','NL',52.37,4.90], ['Brussels','BE',50.85,4.35],
+    ['Stockholm','SE',59.33,18.07], ['Oslo','NO',59.91,10.75], ['Copenhagen','DK',55.68,12.57],
+    ['Helsinki','FI',60.17,24.94], ['Dublin','IE',53.35,-6.26], ['Lisbon','PT',38.72,-9.14],
+    ['Athens','GR',37.98,23.73], ['Prague','CZ',50.08,14.44], ['Zurich','CH',47.38,8.54],
+    ['Munich','DE',48.14,11.58], ['Milan','IT',45.46,9.19], ['Manchester','GB',53.48,-2.24],
+    ['Edinburgh','GB',55.95,-3.19], ['Reykjavik','IS',64.15,-21.94], ['Minsk','BY',53.90,27.57],
+    ['Belgrade','RS',44.79,20.45], ['Sofia','BG',42.70,23.32], ['Zagreb','HR',45.81,15.98],
+    ['Riga','LV',56.95,24.11], ['Vilnius','LT',54.69,25.28], ['Tallinn','EE',59.44,24.75],
+    ['New York','US',40.71,-74.01], ['Los Angeles','US',34.05,-118.24], ['San Francisco','US',37.77,-122.42],
+    ['Seattle','US',47.61,-122.33], ['Denver','US',39.74,-104.99], ['Phoenix','US',33.45,-112.07],
+    ['Las Vegas','US',36.17,-115.14], ['Detroit','US',42.33,-83.05], ['Minneapolis','US',44.98,-93.27],
+    ['New Orleans','US',29.95,-90.07], ['Anchorage','US',61.22,-149.90], ['Honolulu','US',21.31,-157.86],
+    ['Vancouver','CA',49.28,-123.12], ['Calgary','CA',51.05,-114.07], ['Montreal','CA',45.50,-73.57],
+    ['Ottawa','CA',45.42,-75.70], ['Havana','CU',23.11,-82.37], ['Kingston','JM',17.97,-76.79],
+    ['Panama City','PA',8.98,-79.52], ['San José','CR',9.93,-84.08], ['Guatemala City','GT',14.63,-90.51],
+    ['Monterrey','MX',25.69,-100.32], ['Tijuana','MX',32.51,-117.04], ['Caracas','VE',10.48,-66.90],
+    ['Quito','EC',-0.18,-78.47], ['La Paz','BO',-16.50,-68.15], ['Asunción','PY',-25.26,-57.58],
+    ['Montevideo','UY',-34.90,-56.16], ['Brasília','BR',-15.79,-47.88], ['Salvador','BR',-12.97,-38.50],
+    ['Fortaleza','BR',-3.73,-38.53], ['Manaus','BR',-3.12,-60.02], ['Medellín','CO',6.24,-75.58],
+    ['Cali','CO',3.45,-76.53], ['Nairobi','KE',-1.29,36.82], ['Addis Ababa','ET',9.03,38.74],
+    ['Accra','GH',5.60,-0.19], ['Abidjan','CI',5.36,-4.01], ['Dakar','SN',14.72,-17.47],
+    ['Casablanca','MA',33.57,-7.59], ['Algiers','DZ',36.75,3.06], ['Tunis','TN',36.81,10.17],
+    ['Tripoli','LY',32.89,13.19], ['Cape Town','ZA',-33.92,18.42], ['Durban','ZA',-29.86,31.02],
+    ['Harare','ZW',-17.83,31.05], ['Lusaka','ZM',-15.39,28.32], ['Maputo','MZ',-25.97,32.57],
+    ['Kampala','UG',0.35,32.58], ['Mogadishu','SO',2.05,45.32], ['Antananarivo','MG',-18.88,47.51],
+    ['Ouagadougou','BF',12.37,-1.53], ['Bamako','ML',12.65,-8.00], ['Niamey','NE',13.51,2.11],
+    ['Abuja','NG',9.06,7.49], ['Kano','NG',12.00,8.52], ['Douala','CM',4.05,9.77],
+    ['Windhoek','NA',-22.56,17.08], ['Gaborone','BW',-24.65,25.91], ['Kigali','RW',-1.94,30.06],
+    ['Dubai','AE',25.20,55.27], ['Abu Dhabi','AE',24.45,54.38], ['Doha','QA',25.29,51.53],
+    ['Kuwait City','KW',29.38,47.99], ['Muscat','OM',23.59,58.41], ['Manama','BH',26.23,50.59],
+    ['Amman','JO',31.95,35.93], ['Beirut','LB',33.89,35.50], ['Damascus','SY',33.51,36.29],
+    ['Jerusalem','IL',31.77,35.21], ['Tel Aviv','IL',32.09,34.78], ['Ankara','TR',39.93,32.86],
+    ['Tbilisi','GE',41.72,44.79], ['Yerevan','AM',40.18,44.51], ['Baku','AZ',40.41,49.87],
+    ['Tashkent','UZ',41.30,69.24], ['Almaty','KZ',43.24,76.89], ['Astana','KZ',51.17,71.43],
+    ['Kabul','AF',34.53,69.17], ['Islamabad','PK',33.68,73.05], ['Colombo','LK',6.93,79.86],
+    ['Kathmandu','NP',27.72,85.32], ['Hanoi','VN',21.03,105.85], ['Phnom Penh','KH',11.56,104.92],
+    ['Vientiane','LA',17.97,102.63], ['Taipei','TW',25.03,121.57], ['Pyongyang','KP',39.04,125.76],
+    ['Busan','KR',35.18,129.08], ['Sapporo','JP',43.06,141.35], ['Ulaanbaatar','MN',47.89,106.91],
+    ['Novosibirsk','RU',55.01,82.93], ['Yekaterinburg','RU',56.84,60.61], ['Vladivostok','RU',43.12,131.89],
+    ['Surabaya','ID',-7.25,112.75], ['Bandung','ID',-6.92,107.61], ['Medan','ID',3.59,98.67],
+    ['Cebu','PH',10.32,123.89], ['Port Moresby','PG',-9.44,147.18], ['Suva','FJ',-18.14,178.44],
+    ['Nuuk','GL',64.18,-51.72], ['Ushuaia','AR',-54.80,-68.30], ['Longyearbyen','SJ',78.22,15.65]
+  ].map(function (c) { return { name: c[0], cc: c[1], lat: c[2], lng: c[3] }; });
 
   /* ════════════════════════════════════════════════════════════
      MAP
@@ -1032,6 +1145,35 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
 
   /* The arc carries a position in each projection so it can be mixed the
      same way the terrain under it is. */
+  /* City markers: unlit and additive, so they read as light rather than
+     as objects. The column fades out towards its top; the ground disc
+     uses the same mesh with the fade switched off. */
+  var GLOW_VERT = [
+    'attribute vec3 a_pos;',
+    'uniform mat4 u_globe, u_globe_model, u_mercator;',
+    'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
+    'varying float v_up;',
+    'void main() {',
+    '  v_up = a_pos.z + 0.5;',
+    '  vec4 onGlobe = u_globe * vec4(a_pos, 1.0);',
+    '  vec3 spherePos = (u_globe_model * vec4(a_pos, 1.0)).xyz;',
+    '  onGlobe.z = (1.0 - (dot(spherePos, u_globe_clip.xyz) + u_globe_clip.w)) * onGlobe.w;',
+    '  vec4 onPlane = u_mercator * vec4(a_pos, 1.0);',
+    '  gl_Position = mix(onPlane, onGlobe, u_transition);',
+    '}'
+  ].join('\n');
+
+  var GLOW_FRAG = [
+    'precision mediump float;',
+    'uniform vec3 u_color;', 'uniform float u_intensity;', 'uniform float u_fade_up;',
+    'varying float v_up;',
+    'void main() {',
+    '  float a = mix(1.0, 1.0 - v_up, u_fade_up);',
+    '  a = a * a * u_intensity;',
+    '  gl_FragColor = vec4(u_color * a, a);',
+    '}'
+  ].join('\n');
+
   var PATH_VERT = [
     'attribute vec3 a_merc;', 'attribute vec3 a_globe;',
     'attribute vec3 a_off_merc;', 'attribute vec3 a_off_globe;',
@@ -1128,9 +1270,13 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
 
   var gfx = null;          /* GL objects, once the layer is added */
   var pathMesh = null;     /* {mercBuf, globeBuf, sBuf, count} for the current solution */
+  var CITY_OFF = new Float32Array([0.42, 0.72, 1.0]);   /* cold blue-white */
+  var CITY_ON = new Float32Array([1.0, 0.78, 0.35]);    /* the one being aimed at */
+
   var scene = {            /* what the layer should draw right now */
     rail: null,            /* {lng, lat, alt, dir[3], length, bore} */
     projectile: null,      /* {lng, lat, alt, dir[3], size, glow} */
+    cities: [],            /* markers near the middle of the view */
     progress: 0
   };
 
@@ -1140,6 +1286,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     onAdd: function (_m, gl) {
       var solidProg = link(gl, SOLID_VERT, SOLID_FRAG);
       var pathProg = link(gl, PATH_VERT, PATH_FRAG);
+      var glowProg = link(gl, GLOW_VERT, GLOW_FRAG);
       var mesh = buildSolids(40);
       function buf(data) {
         var b = gl.createBuffer();
@@ -1162,6 +1309,18 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
           uNrm: gl.getUniformLocation(solidProg, 'u_normal'),
           uCol: gl.getUniformLocation(solidProg, 'u_color'),
           uGlow: gl.getUniformLocation(solidProg, 'u_glow')
+        },
+        glow: {
+          prog: glowProg,
+          aPos: gl.getAttribLocation(glowProg, 'a_pos'),
+          uGlobe: gl.getUniformLocation(glowProg, 'u_globe'),
+          uGlobeModel: gl.getUniformLocation(glowProg, 'u_globe_model'),
+          uMerc: gl.getUniformLocation(glowProg, 'u_mercator'),
+          uClip: gl.getUniformLocation(glowProg, 'u_globe_clip'),
+          uTrans: gl.getUniformLocation(glowProg, 'u_transition'),
+          uCol: gl.getUniformLocation(glowProg, 'u_color'),
+          uIntensity: gl.getUniformLocation(glowProg, 'u_intensity'),
+          uFadeUp: gl.getUniformLocation(glowProg, 'u_fade_up')
         },
         path: {
           prog: pathProg,
@@ -1259,6 +1418,48 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
         gl.uniform3fv(S.uCol, colour);
         gl.uniform1f(S.uGlow, glow || 0);
         gl.drawArrays(gl.TRIANGLES, part.at, part.count);
+      }
+
+      /* ── city markers ── */
+      if (scene.cities.length) {
+        var G = gfx.glow;
+        gl.useProgram(G.prog);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);        /* light adds to what is there */
+        gl.depthMask(false);
+        gl.uniform4f(G.uClip, plane[0], plane[1], plane[2], plane[3]);
+        gl.uniform1f(G.uTrans, t);
+        gl.bindBuffer(gl.ARRAY_BUFFER, S.posBuf);
+        gl.enableVertexAttribArray(G.aPos);
+        gl.vertexAttribPointer(G.aPos, 3, gl.FLOAT, false, 0, 0);
+
+        for (var ci = 0; ci < scene.cities.length; ci++) {
+          var mk = scene.cities[ci];
+          drawGlow(mk, mk.column, 1);         /* the column, fading upward */
+          drawGlow(mk, mk.disc, 0);           /* the mark on the ground */
+        }
+        gl.disableVertexAttribArray(G.aPos);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      function drawGlow(mk, shape, fadeUp) {
+        if (!shape || shape.intensity <= 0.004) return;
+        var G = gfx.glow;
+        var body = m4scale(shape.width, shape.width, shape.height);
+        var lift = m4translate(0, 0, shape.height / 2);   /* stand it on the ground */
+        var globeModel = m4mul(m4mul(globeFrame(mk.lng, mk.lat, mk.alt), lift), body);
+        var mc = maplibregl.MercatorCoordinate.fromLngLat({ lng: mk.lng, lat: mk.lat }, mk.alt);
+        var metre = mc.meterInMercatorCoordinateUnits();
+        var mercModel = m4mul(m4mul(m4mul(
+          m4translate(mc.x, mc.y, mc.z), m4scale(metre, metre, metre)), lift), body);
+        gl.uniformMatrix4fv(G.uMerc, false, new Float32Array(m4mul(mercMat, mercModel)));
+        gl.uniformMatrix4fv(G.uGlobe, false, new Float32Array(m4mul(globeMat, globeModel)));
+        gl.uniformMatrix4fv(G.uGlobeModel, false, new Float32Array(globeModel));
+        gl.uniform3fv(G.uCol, mk.selected ? CITY_ON : CITY_OFF);
+        gl.uniform1f(G.uIntensity, shape.intensity);
+        gl.uniform1f(G.uFadeUp, fadeUp);
+        gl.drawArrays(gl.TRIANGLES, S.parts.cylinder.at, S.parts.cylinder.count);
       }
 
       if (scene.rail) {
@@ -1576,6 +1777,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     }
 
     drawChart();
+    renderAimChip();
     $('fire').disabled = false;
     map.triggerRepaint();
   }
@@ -1950,6 +2152,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     flight.playing = true;
     flight.last = 0;
     document.body.classList.add('flying');
+    updateCities();                       /* markers stand down for the flight */
     map.setCenterClampedToGround(false);
     map.dragPan.disable(); map.scrollZoom.disable();
     map.dragRotate.disable(); map.touchZoomRotate.disable(); map.keyboard.disable();
@@ -1970,6 +2173,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     map.dragRotate.enable(); map.touchZoomRotate.enable(); map.keyboard.enable();
     map.doubleClickZoom.enable();
     scene.projectile = null;
+    setTimeout(updateCities, 60);
     scene.progress = 1;
     map.triggerRepaint();
     if (solution) lookAtRange();
@@ -2029,6 +2233,137 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
       flight.orbit.dist = Math.max(60, Math.min(400000, flight.orbit.dist * Math.exp(e.deltaY * 0.001)));
     }, { passive: false });
   })();
+
+
+  /* ════════════════════════════════════════════════════════════
+     CITIES ON THE GLOBE
+     A column of light where each city stands, lit by how close it is
+     to the middle of the view — so the globe is not a pincushion, and
+     whatever you are looking at announces itself. Close in the column
+     gives way to a glow on the ground at the city centre.
+     ════════════════════════════════════════════════════════════ */
+
+  var focusedCity = null;
+
+  function bearingTo(from, to) {
+    var f1 = from.lat * D2R, f2 = to.lat * D2R, dl = (to.lng - from.lng) * D2R;
+    var y = Math.sin(dl) * Math.cos(f2);
+    var x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+    return (Math.atan2(y, x) / D2R + 360) % 360;
+  }
+
+  function updateCities() {
+    if (!$('showcities').checked || flight.active) {
+      if (scene.cities.length) { scene.cities = []; map.triggerRepaint(); }
+      focusedCity = null;
+      $('aimchip').hidden = true;
+      return;
+    }
+    var canvas = map.getCanvas();
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    var cx = w / 2, cy = h / 2;
+    var reach = 0.46 * Math.min(w, h);          /* how far from the middle still counts */
+    var eye = cameraEye();
+    var occluded = map.transform && map.transform.isLocationOccluded
+      ? map.transform.isLocationOccluded.bind(map.transform) : null;
+
+    var lit = [];
+    for (var i = 0; i < CITIES.length; i++) {
+      var c = CITIES[i];
+      if (occluded && occluded({ lng: c.lng, lat: c.lat })) continue;   /* round the back */
+      var p;
+      try { p = map.project({ lng: c.lng, lat: c.lat }); } catch (e) { continue; }
+      if (!p || !isFinite(p.x)) continue;
+      if (p.x < -w || p.x > 2 * w || p.y < -h || p.y > 2 * h) continue;
+      var r = Math.hypot(p.x - cx, p.y - cy);
+      if (r > reach) continue;
+      var focus = 1 - r / reach;
+
+      var m = metresPerDegree(c.lat);
+      var far = Math.max(200, Math.hypot(
+        (eye.lng - c.lng) * m.lng, (eye.lat - c.lat) * m.lat, eye.alt));
+
+      /* A column tall enough to see from orbit and wide enough to read
+         at that range, a mark small enough to stand on a street. Both
+         are sized by angle — by how far away the eye is — so they hold
+         the same presence at 8000 km as at 800 m. The column gives way
+         to the mark between 60 km and 12 km out. */
+      var toGround = 1 - Math.min(1, Math.max(0, (far - 12000) / 48000));   /* 1 close in */
+      var colHeight = Math.max(4000, Math.min(700000, far * 0.055));
+      var colWidth = Math.max(400, Math.min(45000, far * 0.005));
+      var discWidth = Math.max(120, Math.min(8000, far * 0.03));
+      /* Stand it on the ground, not at sea level, or a city on a hill
+         buries its own marker in the terrain when you get close. */
+      var ground = 0;
+      if (toGround > 0.02 && map.queryTerrainElevation) {
+        var g = map.queryTerrainElevation({ lng: c.lng, lat: c.lat });
+        if (g !== null && g !== undefined && isFinite(g)) ground = g;
+      }
+      lit.push({
+        name: c.name, cc: c.cc, lng: c.lng, lat: c.lat, alt: ground + 4,
+        focus: focus, far: far, screen: p, selected: false,
+        column: { width: colWidth, height: colHeight,
+                  intensity: 0.85 * focus * focus * (1 - toGround) },
+        disc: { width: discWidth, height: discWidth * 0.22,
+                intensity: 0.9 * Math.pow(focus, 1.5) * toGround }
+      });
+    }
+    lit.sort(function (a, b) { return b.focus - a.focus; });
+    if (lit.length > 30) lit.length = 30;
+
+    focusedCity = lit.length && lit[0].focus > 0.12 ? lit[0] : null;
+    if (focusedCity) focusedCity.selected = true;
+    scene.cities = lit;
+    map.triggerRepaint();
+    renderAimChip();
+  }
+
+  function renderAimChip() {
+    var chip = $('aimchip');
+    if (!focusedCity || !pad) { chip.hidden = true; return; }
+    chip.hidden = false;
+    $('aim-who').textContent = focusedCity.name + ', ' + focusedCity.cc;
+    var range = groundDistance(pad, focusedCity);
+    var brg = bearingTo(pad, focusedCity);
+    var reachNote = '';
+    if (solution && solution.downrange) {
+      var over = solution.downrange - range;
+      reachNote = Math.abs(over) < range * 0.03 ? ' · on range'
+        : over > 0 ? ' · ' + kmStr(over) + ' long' : ' · ' + kmStr(-over) + ' short';
+    }
+    $('aim-how').textContent = kmStr(range) + ' · ' + Math.round(brg) + '°' + reachNote;
+    $('aim-go').disabled = false;
+  }
+
+  function aimAtCity(city) {
+    if (!city || !pad) return;
+    var brg = bearingTo(pad, city);
+    aimChanged(brg);
+    toast('Aimed at ' + city.name + ' — ' + Math.round(brg) + '°, ' +
+          kmStr(groundDistance(pad, city)) + ' away', 3200);
+  }
+
+  $('aim-go').addEventListener('click', function () { aimAtCity(focusedCity); });
+  $('showcities').addEventListener('change', updateCities);
+
+  /* Clicking a marker aims at it, unless a pad is being placed. */
+  map.on('click', function (e) {
+    if (picking || flight.active || !scene.cities.length) return;
+    var best = null, bestD = 34;
+    for (var i = 0; i < scene.cities.length; i++) {
+      var c = scene.cities[i];
+      var d = Math.hypot(c.screen.x - e.point.x, c.screen.y - e.point.y);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best) aimAtCity(best);
+  });
+
+  var cityTimer = null;
+  map.on('move', function () {
+    clearTimeout(cityTimer);
+    cityTimer = setTimeout(updateCities, 90);
+  });
+  map.on('moveend', updateCities);
 
   /* ════════════════════════════════════════════════════════════
      THE COUNT
@@ -2344,6 +2679,7 @@ body.flying .maplibregl-ctrl-top-right { display: none; }
     setTimeout(function () { $('loader').style.display = 'none'; }, 800);
     if (window.innerWidth < 720) { panel.classList.add('collapsed'); panelBtn.classList.add('show'); }
     setCamera('chase');
+    updateCities();
 
     /* Wait for the terrain under the default view, then set a starting pad
        so the page opens with something solved rather than empty. */
