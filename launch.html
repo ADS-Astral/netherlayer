@@ -1,0 +1,2918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Netherlayer Launch Range — EM Launcher on the Globe</title>
+<meta http-equiv="cache-control" content="no-cache"/>
+<meta name="build" content="2026-08-05"/>
+<meta name="description" content="Pick a launch pad on real 3D terrain, solve the railgun shot, then fly the trajectory the physics predicts from the pad, the chase, the nose or the tail."/>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css"/>
+<style>
+/* ─── Design tokens (shared with the Netherlayer site) ─── */
+:root {
+  --bg:       #0e0e1c;
+  --surface:  #0e0e1c;
+  --sh-dark:  #07070f;
+  --gold:     #d4af37;
+  --gold2:    #f0c040;
+  --text:     #d8d8f0;
+  --muted:    #7070a0;
+  --accent:   #e67e22;
+  --green:    #2ecc71;
+  --red:      #e74c3c;
+  --radius:   16px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--gold); text-decoration: none; }
+a:hover { color: var(--gold2); }
+
+#map { position: absolute; inset: 0; background: #05050c; }
+
+.nm {
+  background: rgba(14,14,28,.9);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(212,175,55,.16);
+  box-shadow: 6px 6px 18px rgba(7,7,15,.75);
+  border-radius: var(--radius);
+}
+
+/* ─── Top bar ─── */
+#topbar {
+  position: absolute; top: 14px; left: 14px; z-index: 20;
+  display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+}
+#topbar .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .14em; font-size: 13px; color: var(--gold); }
+#topbar .sep { width: 1px; height: 18px; background: rgba(212,175,55,.25); }
+#topbar .tagline { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+#topbar .build { margin-left: 8px; font-size: 10px; color: #4a4a70; letter-spacing: .08em; }
+@media (max-width: 860px) { #topbar .sep, #topbar .tagline { display: none; } }
+
+/* ─── Panels ─── */
+#panel {
+  position: absolute; top: 68px; left: 14px; z-index: 20;
+  width: 306px; max-height: calc(100% - 178px);
+  overflow-y: auto; overscroll-behavior: contain; padding: 14px;
+}
+#panel::-webkit-scrollbar { width: 8px; }
+#panel::-webkit-scrollbar-thumb { background: rgba(212,175,55,.22); border-radius: 8px; }
+#panel.collapsed { display: none; }
+body.flying #panel { max-height: calc(100% - 300px); }
+
+.grp { margin-bottom: 14px; }
+.grp:last-child { margin-bottom: 2px; }
+.grp > h3 {
+  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; margin-bottom: 8px;
+}
+
+select, input[type=text], input[type=number] {
+  width: 100%; padding: 8px 10px;
+  background: #0a0a16; color: var(--text);
+  border: 1px solid rgba(212,175,55,.2); border-radius: 10px;
+  font: inherit; font-size: 13px; outline: none;
+}
+select:focus, input[type=number]:focus { border-color: var(--gold); }
+input.invalid { border-color: var(--red); }
+
+.dims { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.dims.three { grid-template-columns: 1fr 1fr 1fr; }
+.dims label {
+  display: block; font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; white-space: nowrap;
+}
+.dims input, .dims select { display: block; margin-top: 4px; }
+.dims .with-unit { display: grid; grid-template-columns: 1fr auto; gap: 4px; }
+.dims .with-unit select { width: auto; padding: 8px 4px; font-size: 11px; }
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.row label { font-size: 12.5px; color: var(--text); }
+.row .val { font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
+
+input[type=range] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin: 6px 0 2px;
+  background: linear-gradient(90deg, #7a5c00, rgba(212,175,55,.25));
+  border-radius: 4px; outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--gold); cursor: pointer; box-shadow: 0 0 8px rgba(212,175,55,.5);
+}
+input[type=range]::-moz-range-thumb { width: 15px; height: 15px; border: none; border-radius: 50%; background: var(--gold); cursor: pointer; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 12px; width: 100%;
+  background: #0a0a16; color: var(--text);
+  border: 1px solid rgba(212,175,55,.22); border-radius: 10px;
+  font: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: .03em;
+  cursor: pointer; transition: all .18s;
+}
+.btn:hover:not(:disabled) { border-color: var(--gold); color: var(--gold2); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.armed { background: linear-gradient(135deg, rgba(230,126,34,.28), rgba(230,126,34,.08)); border-color: var(--accent); color: #ffb066; }
+.btn-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn.fire {
+  margin-top: 10px; padding: 13px; font-size: 14px; letter-spacing: .16em;
+  background: linear-gradient(135deg, rgba(231,76,60,.3), rgba(212,175,55,.12));
+  border-color: rgba(231,76,60,.6); color: #ffd9a0;
+}
+.btn.fire:hover:not(:disabled) { border-color: var(--red); color: #fff; }
+
+/* ─── Compass ─── */
+.compass { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin-top: 7px; }
+.compass button {
+  padding: 4px 0; font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  background: #0a0a16; color: var(--muted); cursor: pointer;
+  border: 1px solid rgba(212,175,55,.16); border-radius: 6px;
+}
+.compass button:hover { color: var(--gold2); border-color: var(--gold); }
+.compass button.on { background: var(--gold); color: #0e0e1c; border-color: var(--gold); }
+
+/* ─── Verdict ─── */
+#verdict { padding: 12px 14px; margin-bottom: 12px; }
+#flag {
+  font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted);
+}
+#flag.yes { color: var(--green); }
+#flag.no { color: var(--red); }
+#why { font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+#why b { color: var(--text); }
+.stats { display: grid; grid-template-columns: 1fr; gap: 3px; margin-top: 10px; }
+.stats div { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
+.stats span { color: var(--muted); }
+.stats b { color: var(--gold2); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.hint { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.hint b { color: #9a9ac8; font-weight: 600; }
+.pad-line { font-size: 11.5px; color: var(--gold2); font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+
+/* ─── Chart ─── */
+#chartcard {
+  position: absolute; top: 68px; right: 14px; z-index: 20;
+  width: 330px; padding: 12px 14px;
+}
+#chartcard h3 {
+  font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; margin-bottom: 6px;
+}
+#chart { width: 100%; height: 168px; display: block; }
+#chartnote { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+@media (max-width: 1100px) { #chartcard { display: none; } }
+
+/* ─── Flight HUD ─── */
+#hud {
+  position: absolute; left: 14px; bottom: 14px; z-index: 20;
+  display: grid; grid-template-columns: repeat(4, minmax(58px, auto));
+  gap: 2px 16px; padding: 9px 15px; font-variant-numeric: tabular-nums;
+}
+#hud .k { font-size: 9px; letter-spacing: .13em; color: var(--muted); text-transform: uppercase; }
+#hud .v { font-size: 13px; color: var(--gold2); font-weight: 600; }
+
+/* ─── Flight bar ─── */
+#flightbar {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 14px; z-index: 22; width: min(620px, calc(100% - 28px));
+  padding: 10px 14px;
+}
+body:not(.flying) #flightbar { display: none; }
+.cams { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.cam {
+  padding: 6px 11px; font-size: 11.5px; border-radius: 20px; cursor: pointer;
+  background: #0a0a16; color: var(--muted); border: 1px solid rgba(212,175,55,.16);
+  transition: all .16s; font-family: inherit;
+}
+.cam:hover { color: var(--gold2); border-color: rgba(212,175,55,.5); }
+.cam.on { color: #0e0e1c; background: var(--gold); border-color: var(--gold); font-weight: 700; }
+.cams.waiting { opacity: .45; }
+.cams.waiting::after {
+  content: 'globe view — resumes below 88 km';
+  flex-basis: 100%; text-align: center; margin-top: 4px;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold2);
+}
+.playrow { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 9px; }
+.playrow .lbl { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.playrow .rate { font-size: 11.5px; color: var(--gold2); font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
+#scrub { margin-top: 4px; }
+.flightbtns { display: flex; gap: 6px; margin-top: 9px; }
+.flightbtns .btn { padding: 6px 8px; font-size: 11px; }
+
+@media (max-width: 720px) {
+  #hud { grid-template-columns: repeat(4, minmax(48px, auto)); gap: 1px 10px; padding: 7px 11px; }
+  #hud .v { font-size: 11.5px; }
+  #hud .k { font-size: 8px; }
+  body.flying #hud { bottom: 176px; }
+}
+
+/* ─── Panel toggle ─── */
+#panel-btn {
+  position: absolute; top: 68px; left: 14px; z-index: 21;
+  width: 40px; height: 40px; display: none;
+  align-items: center; justify-content: center; cursor: pointer;
+  color: var(--gold); font-size: 17px;
+}
+#panel-btn.show { display: flex; }
+body.placing .maplibregl-canvas { cursor: crosshair; }
+
+/* ─── City in the crosshairs ─── */
+#aimchip {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 21; display: flex; align-items: center; gap: 10px;
+  padding: 7px 8px 7px 14px; max-width: min(560px, calc(100% - 28px));
+}
+body.flying #aimchip, body.placing #aimchip { display: none; }
+#aimchip .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #6bb8ff; flex: none;
+  box-shadow: 0 0 10px 2px rgba(107,184,255,.75);
+}
+#aimchip .who { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; color: var(--text); white-space: nowrap; }
+#aimchip .how { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#aimchip .btn { width: auto; padding: 6px 12px; font-size: 11.5px; }
+@media (max-width: 720px) {
+  #aimchip { top: 62px; padding: 6px 7px 6px 11px; gap: 7px; }
+  #aimchip .who { font-size: 11.5px; }
+  #aimchip .how { font-size: 10.5px; }
+}
+
+/* ─── Countdown ─── */
+#countdown {
+  position: absolute; inset: 0; z-index: 34;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: radial-gradient(circle at 50% 45%, rgba(5,5,16,.45), rgba(5,5,16,.82) 70%);
+  pointer-events: none;
+}
+#countdown .btn { pointer-events: auto; }
+.cd-num {
+  font-size: clamp(64px, 14vw, 150px); font-weight: 700; line-height: 1;
+  color: var(--gold2); letter-spacing: .04em;
+  text-shadow: 0 0 40px rgba(212,175,55,.45);
+  font-variant-numeric: tabular-nums;
+}
+.cd-num.holding { color: #9a9ac8; text-shadow: 0 0 30px rgba(112,112,160,.4); }
+.cd-num.go { color: #ff9b4a; text-shadow: 0 0 60px rgba(231,76,60,.6); font-size: clamp(40px, 8vw, 86px); }
+.cd-cap { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); text-align: center; padding: 0 16px; }
+.cd-bar { width: min(320px, 60vw); height: 3px; background: rgba(212,175,55,.16); border-radius: 3px; overflow: hidden; }
+.cd-bar i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .3s linear; }
+
+/* ─── Loader / toast ─── */
+#loader {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+  background: radial-gradient(circle at 50% 45%, #12122a, #05050c 70%);
+  transition: opacity .7s ease; text-align: center; padding: 20px;
+}
+#loader.gone { opacity: 0; pointer-events: none; }
+.orbit { width: 74px; height: 74px; position: relative; }
+.orbit::before, .orbit::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid transparent; border-top-color: var(--gold); animation: spin 1.4s linear infinite;
+}
+.orbit::after { inset: 13px; border-top-color: var(--accent); animation-duration: .9s; animation-direction: reverse; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loader .t { font-size: 12px; letter-spacing: .22em; color: var(--muted); text-transform: uppercase; }
+
+#toast {
+  position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%) translateY(12px);
+  z-index: 30; padding: 10px 16px; font-size: 12.5px; color: var(--text);
+  opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; max-width: 78vw; text-align: center;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ─── MapLibre chrome ─── */
+.maplibregl-ctrl-group {
+  background: rgba(14,14,28,.88) !important;
+  border: 1px solid rgba(212,175,55,.16) !important;
+  border-radius: 12px !important; overflow: hidden;
+}
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(78%) sepia(38%) saturate(520%) hue-rotate(2deg) brightness(94%); }
+.maplibregl-ctrl-group button:hover { background: rgba(212,175,55,.12) !important; }
+.maplibregl-ctrl-attrib { background: rgba(14,14,28,.8) !important; border-radius: 10px 0 0 0; font-size: 10.5px; max-width: 56vw; }
+.maplibregl-ctrl-attrib a { color: #8a8ab8 !important; }
+body.flying .maplibregl-ctrl-top-right { display: none; }
+/* A horizontal scale bar means nothing under the free flight cameras, and
+   MapLibre cannot measure one when the camera is tipped past level. */
+body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { display: none; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="topbar" class="nm">
+  <div class="logo">
+    <svg width="18" height="18" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+      <polygon points="11,1 14,8 21,8.5 16,13.5 17.5,21 11,17 4.5,21 6,13.5 1,8.5 8,8" fill="#d4af37" opacity=".9"/>
+    </svg>
+    <a href="index.html" style="color:inherit">NETHERLAYER</a>
+  </div>
+  <div class="sep"></div>
+  <div class="tagline" title="build 2026-08-05">Launch Range — <a href="globe.html">globe</a> · <a href="em-launcher.html">launcher</a><span class="build">2026-08-05</span></div>
+</div>
+
+<!-- ── Launcher panel ── -->
+<div id="panel" class="nm">
+
+  <div id="verdict" class="nm" style="background:rgba(10,10,22,.6)">
+    <div id="flag">—</div>
+    <div id="why">Pick a pad, then check the numbers.</div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <button class="btn fire" id="fire" disabled>▲ LAUNCH</button>
+
+  <div class="grp" style="margin-top:14px">
+    <h3>Launch pad</h3>
+    <div class="pad-line" id="padline">No pad selected</div>
+    <button class="btn" id="pick">◎ Click the terrain to set the pad</button>
+    <div class="dims" style="margin-top:8px">
+      <label>Elevation angle
+        <input type="number" id="angle" value="30" min="1" max="89" step="1"/>
+      </label>
+      <label>Azimuth
+        <input type="number" id="azimuth" value="90" min="0" max="359" step="1"/>
+      </label>
+    </div>
+    <div class="row" style="padding-bottom:0">
+      <label for="azdial">Rotate the aim</label>
+      <span class="val" id="azlbl">090° · E</span>
+    </div>
+    <input type="range" id="azdial" min="0" max="359" step="1" value="90"/>
+    <div class="compass" id="compass">
+      <button type="button" data-az="0">N</button>
+      <button type="button" data-az="45">NE</button>
+      <button type="button" data-az="90">E</button>
+      <button type="button" data-az="135">SE</button>
+      <button type="button" data-az="180">S</button>
+      <button type="button" data-az="225">SW</button>
+      <button type="button" data-az="270">W</button>
+      <button type="button" data-az="315">NW</button>
+    </div>
+    <p class="hint" id="padhint">&nbsp;</p>
+  </div>
+
+  <div class="grp">
+    <h3>Projectile</h3>
+    <div class="dims">
+      <label>Payload
+        <span class="with-unit">
+          <input type="number" id="mPay" value="100" min="0" step="any"/>
+          <select id="mPayUnit"><option value="1">kg</option><option value="1000">t</option></select>
+        </span>
+      </label>
+      <label>Sabot (kg)
+        <input type="number" id="mSabot" value="20" min="0" step="any"/>
+      </label>
+    </div>
+    <div class="dims">
+      <label>Diameter (m)
+        <input type="number" id="dPay" value="0.3" min="0" step="any"/>
+      </label>
+      <label>Nose
+        <select id="shape"></select>
+      </label>
+    </div>
+    <p class="hint" id="dPayHint">&nbsp;</p>
+  </div>
+
+  <div class="grp">
+    <h3>Target</h3>
+    <select id="dest"></select>
+    <div class="dims" style="margin-top:8px">
+      <label>Altitude (km)
+        <input type="number" id="alt" value="200" min="0" step="any"/>
+      </label>
+      <label>Rail length
+        <span class="with-unit">
+          <input type="number" id="rail" value="1000" min="0" step="any"/>
+          <select id="railUnit"><option value="1">m</option><option value="1000">km</option></select>
+        </span>
+      </label>
+    </div>
+  </div>
+
+  <div class="grp">
+    <h3>Rails</h3>
+    <div class="dims">
+      <label>Bore gap (m)
+        <input type="number" id="gap" value="0.5" min="0" step="any"/>
+      </label>
+      <label>Rail height (m)
+        <input type="number" id="railH" value="0.5" min="0" step="any"/>
+      </label>
+    </div>
+    <p class="hint" id="gapHint">&nbsp;</p>
+  </div>
+
+  <div class="grp">
+    <h3>Capacitor bank</h3>
+    <select id="capType"></select>
+    <div class="dims" style="margin-top:8px">
+      <label>Capacitance
+        <span class="with-unit">
+          <input type="number" id="cap" value="20" min="0" step="any"/>
+          <select id="capUnit"><option value="1">F</option><option value="0.001">mF</option><option value="0.000001">µF</option></select>
+        </span>
+      </label>
+      <label>Voltage
+        <span class="with-unit">
+          <input type="number" id="volt" value="30" min="0" step="any"/>
+          <select id="voltUnit"><option value="1000">kV</option><option value="1">V</option><option value="1000000">MV</option></select>
+        </span>
+      </label>
+    </div>
+    <div class="dims">
+      <label>Resistance
+        <span class="with-unit">
+          <input type="number" id="res" value="100" min="0" step="any"/>
+          <select id="resUnit"><option value="0.000001">µΩ</option><option value="0.001">mΩ</option><option value="1">Ω</option></select>
+        </span>
+      </label>
+      <label>Inductance (µH)
+        <input type="number" id="ind" value="500" min="0" step="any"/>
+      </label>
+    </div>
+    <p class="hint" id="bankHint">&nbsp;</p>
+  </div>
+
+  <div class="grp">
+    <h3>Scene</h3>
+    <select id="basemap">
+      <option value="imagery">Satellite imagery</option>
+      <option value="topo">Topographic</option>
+      <option value="dark">Dark carto</option>
+    </select>
+    <div class="row" style="margin-top:6px">
+      <label for="showtrack">Ground track</label>
+      <span><input type="checkbox" id="showtrack" checked/></span>
+    </div>
+    <div class="row">
+      <label for="showcities">City markers</label>
+      <span><input type="checkbox" id="showcities" checked/></span>
+    </div>
+    <div class="row">
+      <label for="showbuildings">3D buildings at the target</label>
+      <span><input type="checkbox" id="showbuildings" checked/></span>
+    </div>
+    <p class="hint" style="margin-top:6px">
+      Terrain is drawn at true vertical scale here, so the pad height the physics
+      uses is the height you see.
+    </p>
+  </div>
+</div>
+<div id="panel-btn" class="nm" title="Show the launcher">☰</div>
+
+<!-- ── Chart ── -->
+<div id="chartcard" class="nm">
+  <h3>Altitude against time</h3>
+  <svg id="chart" viewBox="0 0 330 168" role="img" aria-label="Predicted altitude against time"></svg>
+  <div id="chartnote">&nbsp;</div>
+</div>
+
+<!-- ── HUD ── -->
+<div id="hud" class="nm">
+  <div><div class="k">T +</div><div class="v" id="h-t">—</div></div>
+  <div><div class="k">Altitude</div><div class="v" id="h-alt">—</div></div>
+  <div><div class="k">Speed</div><div class="v" id="h-spd">—</div></div>
+  <div><div class="k">Downrange</div><div class="v" id="h-rng">—</div></div>
+  <div><div class="k">Vertical</div><div class="v" id="h-vv">—</div></div>
+  <div><div class="k">Dyn press</div><div class="v" id="h-q">—</div></div>
+  <div><div class="k">Decel</div><div class="v" id="h-g">—</div></div>
+  <div><div class="k">Camera</div><div class="v" id="h-cam">—</div></div>
+</div>
+
+<!-- ── Flight bar ── -->
+<div id="flightbar" class="nm">
+  <div class="cams" id="cams"></div>
+  <div class="playrow">
+    <span class="lbl">Pace</span>
+    <input type="range" id="rate" min="0" max="1000" step="1" value="500"/>
+    <span class="rate" id="ratelbl">real time</span>
+  </div>
+  <input type="range" id="scrub" min="0" max="1000" step="1" value="0"/>
+  <div class="flightbtns">
+    <button class="btn" id="playpause">❚❚ Pause</button>
+    <button class="btn" id="apogeebtn">↑ Apogee</button>
+    <button class="btn" id="endbtn">⇥ End</button>
+    <button class="btn" id="reset">✕ Exit flight</button>
+  </div>
+</div>
+
+<div id="countdown" hidden>
+  <div class="cd-num" id="cd-num">10</div>
+  <div class="cd-cap" id="cd-cap">Loading the ground along the flight path</div>
+  <div class="cd-bar"><i id="cd-fill"></i></div>
+  <button class="btn" id="cd-skip" style="width:auto;padding:7px 18px">Skip the count</button>
+</div>
+
+<div id="aimchip" class="nm" hidden>
+  <span class="dot"></span>
+  <span class="who" id="aim-who">—</span>
+  <span class="how" id="aim-how">—</span>
+  <button class="btn" id="aim-go">Aim here</button>
+</div>
+
+<div id="toast" class="nm"></div>
+
+<div id="loader">
+  <div class="orbit"></div>
+  <div class="t">Preparing the range</div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ════════════════════════════════════════════════════════════
+     PHYSICS
+     The rail stage and the atmosphere model are the ones from the
+     electromagnetic launcher page. The coast is the same physics
+     rewritten in three dimensions, so the shot can fly over real
+     ground from a real pad instead of down an abstract range.
+     ════════════════════════════════════════════════════════════ */
+
+  var MU0 = 4e-7 * Math.PI;
+  var G0 = 9.80665;
+  var GM = 3.986004418e14;
+  var R_E = 6371000;
+  var OMEGA = 7.2921159e-5;
+
+  /* 1976 US Standard Atmosphere as piecewise exponentials: [base km, ρ, scale km] */
+  var ATMO = [
+    [0, 1.225, 7.249], [25, 3.899e-2, 6.349], [30, 1.774e-2, 6.682], [40, 3.972e-3, 7.554],
+    [50, 1.057e-3, 8.382], [60, 3.206e-4, 7.714], [70, 8.770e-5, 6.549], [80, 1.905e-5, 5.799],
+    [90, 3.396e-6, 5.382], [100, 5.297e-7, 5.877], [110, 9.661e-8, 7.263], [120, 2.438e-8, 9.473],
+    [130, 8.484e-9, 12.636], [140, 3.845e-9, 16.149], [150, 2.070e-9, 22.523], [180, 5.464e-10, 29.740],
+    [200, 2.789e-10, 37.105], [250, 7.248e-11, 45.546], [300, 2.418e-11, 53.628], [350, 9.518e-12, 53.298],
+    [400, 3.725e-12, 58.515], [450, 1.585e-12, 60.828], [500, 6.967e-13, 63.822], [600, 1.454e-13, 71.835],
+    [700, 3.614e-14, 88.667], [800, 1.170e-14, 124.64], [900, 5.245e-15, 181.05], [1000, 3.019e-15, 268.00]
+  ];
+  function density(h) {
+    var km = h / 1000;
+    if (km < 0) return ATMO[0][1];
+    if (km > 1100) return 0;
+    var band = ATMO[0];
+    for (var i = 0; i < ATMO.length; i++) if (km >= ATMO[i][0]) band = ATMO[i];
+    return band[1] * Math.exp(-(km - band[0]) / band[2]);
+  }
+
+  var SHAPES = [
+    { name: 'Slender dart', cd: 0.10 }, { name: 'Ogive nose', cd: 0.15 },
+    { name: 'Cone', cd: 0.20 }, { name: 'Sphere', cd: 0.47 },
+    { name: 'Blunt cylinder', cd: 0.80 }, { name: 'Flat disc', cd: 1.15 }
+  ];
+  var CAPS = [
+    { name: 'Film — metallised polypropylene', jkg: 1500, note: 'The pulsed-power workhorse. Low ESR, survives full discharge in milliseconds.' },
+    { name: 'Film — oil-impregnated paper', jkg: 900, note: 'Older pulsed-power technology. Heavier, but tolerant of brutal duty.' },
+    { name: 'Aluminium electrolytic', jkg: 300, note: 'Cheap and dense in farads, but ESR and inductance fight a fast discharge.' },
+    { name: 'Supercapacitor (EDLC)', jkg: 18000, note: 'Superb energy density, hopeless pulse. Seconds, not milliseconds.' },
+    { name: 'Ceramic (class 2)', jkg: 100, note: 'Fast and low-loss, but the energy density makes a bank enormous.' }
+  ];
+  var DESTS = [
+    { name: 'Custom altitude', alt: null }, { name: 'Kármán line — 100 km', alt: 100 },
+    { name: 'Very low LEO — 200 km', alt: 200 }, { name: 'LEO / ISS — 420 km', alt: 420 },
+    { name: 'Sun-synchronous — 800 km', alt: 800 }
+  ];
+
+  var inductanceGradient = function (gap, railH) {
+    return (MU0 / Math.PI) * Math.acosh(1 + gap / railH);
+  };
+
+  /* ─── Stage 1: the bank driving the rails ───────────────────────────────
+     Four coupled states. The capacitor drains into a loop whose inductance
+     grows as the armature travels, so the same L′ that produces the force
+     also produces a back-EMF L′·v·I that fights the supply. Current is an
+     outcome, never an input. */
+  function fireRails(p) {
+    var I = 0, Vc = p.v0, v = 0, x = 0, t = 0, eRes = 0;
+    var peakI = 0, peakF = 0, steps = 0;
+
+    while (x < p.railLen && t < 10 && steps < 400000) {
+      var L = p.l0 + p.lp * x;
+      var dI = (Vc - I * p.r - p.lp * v * I) / L;
+      var F = 0.5 * p.lp * I * I;
+      var a = F / p.mass;
+
+      var dt = 1e-4;
+      if (Math.abs(dI) > 0) dt = Math.min(dt, 0.01 * Math.max(Math.abs(I), 1e3) / Math.abs(dI));
+      if (a > 0) dt = Math.min(dt, 0.01 * Math.max(v, 1) / a);
+      dt = Math.max(dt, 1e-9);
+
+      eRes += I * I * p.r * dt;
+      I += dI * dt;
+      Vc -= I / p.cap * dt;
+      v += a * dt;
+      x += v * dt;
+      t += dt;
+      steps++;
+
+      /* Crowbar diode: a real pulsed-power set never lets the bank ring
+         negative — once it reaches zero the current freewheels down. */
+      if (Vc < 0) Vc = 0;
+      if (I < 0) I = 0;
+      if (I > peakI) peakI = I;
+      if (F > peakF) peakF = F;
+      if (I <= 0 && Vc <= 0) break;
+    }
+    var Lend = p.l0 + p.lp * Math.min(x, p.railLen);
+    return {
+      v: v, x: x, t: t, I: I, Vc: Vc, peakI: peakI, peakF: peakF, eRes: eRes,
+      eMag: 0.5 * Lend * I * I, eKin: 0.5 * p.mass * v * v,
+      exited: x >= p.railLen
+    };
+  }
+
+  /* ─── Stage 2: the coast, in three dimensions ───────────────────────────
+     Integrated in an inertial frame with the Earth turning underneath, so
+     the ground track carries the launch azimuth and the drift that comes
+     with it. Drag is against the air the projectile actually meets, and
+     the air turns with the planet. */
+  function flyPath(p) {
+    var lat = p.lat * Math.PI / 180, lon = p.lng * Math.PI / 180;
+    var cl = Math.cos(lat), sl = Math.sin(lat), co = Math.cos(lon), so = Math.sin(lon);
+    var up = [cl * co, cl * so, sl];
+    var east = [-so, co, 0];
+    var north = [-sl * co, -sl * so, cl];
+
+    var th = p.angle * Math.PI / 180, az = p.azimuth * Math.PI / 180;
+    var dir = [
+      Math.cos(th) * Math.sin(az), Math.cos(th) * Math.cos(az), Math.sin(th)
+    ];  /* east, north, up */
+
+    /* Start at the muzzle: the far end of the rail, not the pad itself. */
+    var r0 = R_E + p.siteAlt;
+    var pos = [0, 0, 0], vel = [0, 0, 0];
+    for (var k = 0; k < 3; k++) {
+      var localOffset = p.railLen * (dir[0] * east[k] + dir[1] * north[k] + dir[2] * up[k]);
+      pos[k] = up[k] * r0 + localOffset;
+      vel[k] = p.v0 * (dir[0] * east[k] + dir[1] * north[k] + dir[2] * up[k]);
+    }
+    /* The pad is already moving with the planet. */
+    vel[0] += -OMEGA * pos[1];
+    vel[1] += OMEGA * pos[0];
+
+    var t = 0, apogee = -Infinity, maxQ = 0, maxG = 0, reached = null;
+    var startAlt = Math.hypot(pos[0], pos[1], pos[2]) - R_E;
+    var samples = [];
+    var sampleEvery = 0.02, nextSample = 0;
+    var impact = null, escaped = false;
+
+    while (t < 20000) {
+      var r = Math.hypot(pos[0], pos[1], pos[2]);
+      var alt = r - R_E;
+      if (alt > apogee) apogee = alt;
+
+      var vr = (pos[0] * vel[0] + pos[1] * vel[1] + pos[2] * vel[2]) / r;
+      if (!reached && alt >= p.targetAlt) {
+        reached = { speed: Math.hypot(vel[0], vel[1], vel[2]), vr: vr, t: t,
+                    vt: Math.sqrt(Math.max(0, vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2] - vr * vr)) };
+      }
+
+      /* Air-relative velocity: the atmosphere turns with the Earth. */
+      var wx = vel[0] + OMEGA * pos[1], wy = vel[1] - OMEGA * pos[0], wz = vel[2];
+      var w = Math.max(Math.hypot(wx, wy, wz), 1e-6);
+      var rho = density(alt);
+      var q = 0.5 * rho * w * w;
+      var aDrag = q * p.cdAm;
+      /* The launcher page answers a question about the way up, so the
+         loads it quotes are the ones on the way up. Re-entry is drawn,
+         but it is not what the verdict is about. */
+      if (vr >= 0) {
+        if (q > maxQ) maxQ = q;
+        if (aDrag / G0 > maxG) maxG = aDrag / G0;
+      }
+
+      if (t >= nextSample) {
+        samples.push({ t: t, p: [pos[0], pos[1], pos[2]], v: [vel[0], vel[1], vel[2]],
+                       alt: alt, q: q, g: aDrag / G0 });
+        nextSample = t + sampleEvery;
+        if (samples.length >= 2400) {
+          var thinned = [];
+          for (var j = 0; j < samples.length; j += 2) thinned.push(samples[j]);
+          samples = thinned;
+          sampleEvery *= 2;
+        }
+      }
+
+      /* Down again, out of the world, or out of patience. */
+      if (alt <= p.siteAlt && vr < 0) { impact = t; break; }
+      var energy = 0.5 * (vel[0]*vel[0] + vel[1]*vel[1] + vel[2]*vel[2]) - GM / r;
+      if (energy >= 0 && alt > Math.max(3 * p.targetAlt, 400000)) { escaped = true; break; }
+
+      var g3 = GM / (r * r * r);
+      var ax = -g3 * pos[0] - aDrag * wx / w;
+      var ay = -g3 * pos[1] - aDrag * wy / w;
+      var az2 = -g3 * pos[2] - aDrag * wz / w;
+
+      var speed = Math.hypot(vel[0], vel[1], vel[2]);
+      var dt = Math.min(alt > 150000 ? 2 : 0.2, 100 / Math.max(speed, 1));
+      var atot = Math.hypot(ax, ay, az2);
+      if (atot > 0) dt = Math.min(dt, 0.01 * speed / atot);
+      dt = Math.max(dt, 1e-4);
+      vel[0] += ax * dt; vel[1] += ay * dt; vel[2] += az2 * dt;
+      pos[0] += vel[0] * dt; pos[1] += vel[1] * dt; pos[2] += vel[2] * dt;
+      t += dt;
+    }
+
+    return { samples: samples, apogee: apogee, reached: reached, maxQ: maxQ, maxG: maxG,
+             duration: samples.length ? samples[samples.length - 1].t : 0,
+             impact: impact, escaped: escaped, startAlt: startAlt };
+  }
+
+  /* Inertial position → where it is over the turning Earth. */
+  function toGeodetic(pos, t) {
+    var r = Math.hypot(pos[0], pos[1], pos[2]);
+    var lat = Math.asin(pos[2] / r) * 180 / Math.PI;
+    var lng = (Math.atan2(pos[1], pos[0]) - OMEGA * t) * 180 / Math.PI;
+    lng = ((lng + 180) % 360 + 360) % 360 - 180;
+    return { lng: lng, lat: lat, alt: r - R_E };
+  }
+
+  /* ─── Formatting ─── */
+  function sig(x, n) {
+    n = n || 4;
+    if (!isFinite(x)) return '—';
+    if (x === 0) return '0';
+    var s = x.toPrecision(n);
+    if (s.indexOf('e') >= 0) return Number(s).toString();
+    return s.indexOf('.') >= 0 ? s.replace(/\.?0+$/, '') : s;
+  }
+  var PRE = [[1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ']];
+  function eng(x, unit) {
+    if (!isFinite(x)) return '—';
+    if (x === 0) return '0 ' + unit;
+    var f = null;
+    for (var i = 0; i < PRE.length; i++) if (Math.abs(x) >= PRE[i][0]) { f = PRE[i]; break; }
+    if (!f) f = PRE[PRE.length - 1];
+    return sig(x / f[0], 4) + ' ' + f[1] + unit;
+  }
+  function kmStr(m) { return m >= 1000 ? sig(m / 1000, 4) + ' km' : sig(m, 4) + ' m'; }
+  function secs(t) {
+    if (t >= 60) return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
+    return t >= 1 ? sig(t, 3) + ' s' : t >= 1e-3 ? sig(t * 1e3, 3) + ' ms' : sig(t * 1e6, 3) + ' µs';
+  }
+  function fmtLat(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'N' : 'S'); }
+  function fmtLon(v) { return Math.abs(v).toFixed(3) + '°' + (v >= 0 ? 'E' : 'W'); }
+
+  /* ════════════════════════════════════════════════════════════
+     CITIES
+     Somewhere to aim. Every national capital of consequence plus the
+     largest metropolitan areas on each continent — enough that any
+     bearing off the pad finds something, without crowding the globe.
+     ════════════════════════════════════════════════════════════ */
+  var CITIES = [
+    ['Tokyo','JP',35.69,139.69], ['Delhi','IN',28.61,77.21], ['Shanghai','CN',31.23,121.47],
+    ['Dhaka','BD',23.81,90.41], ['São Paulo','BR',-23.55,-46.63], ['Cairo','EG',30.04,31.24],
+    ['Mexico City','MX',19.43,-99.13], ['Beijing','CN',39.90,116.41], ['Mumbai','IN',19.08,72.88],
+    ['Osaka','JP',34.69,135.50], ['Karachi','PK',24.86,67.01], ['Chongqing','CN',29.56,106.55],
+    ['Istanbul','TR',41.01,28.98], ['Buenos Aires','AR',-34.60,-58.38], ['Kolkata','IN',22.57,88.36],
+    ['Lagos','NG',6.52,3.38], ['Kinshasa','CD',-4.44,15.27], ['Manila','PH',14.60,120.98],
+    ['Tianjin','CN',39.13,117.20], ['Guangzhou','CN',23.13,113.26], ['Rio de Janeiro','BR',-22.91,-43.17],
+    ['Lahore','PK',31.55,74.34], ['Bangalore','IN',12.97,77.59], ['Shenzhen','CN',22.54,114.06],
+    ['Moscow','RU',55.76,37.62], ['Chennai','IN',13.08,80.27], ['Bogotá','CO',4.71,-74.07],
+    ['Jakarta','ID',-6.21,106.85], ['Lima','PE',-12.05,-77.04], ['Paris','FR',48.86,2.35],
+    ['Bangkok','TH',13.76,100.50], ['Hyderabad','IN',17.39,78.49], ['Seoul','KR',37.57,126.98],
+    ['Nagoya','JP',35.18,136.91], ['London','GB',51.51,-0.13], ['Tehran','IR',35.69,51.39],
+    ['Chicago','US',41.88,-87.63], ['Chengdu','CN',30.57,104.07], ['Nanjing','CN',32.06,118.80],
+    ['Wuhan','CN',30.59,114.31], ['Ho Chi Minh City','VN',10.82,106.63], ['Luanda','AO',-8.84,13.23],
+    ['Ahmedabad','IN',23.02,72.57], ['Kuala Lumpur','MY',3.14,101.69], ['Xi\u2019an','CN',34.34,108.94],
+    ['Hong Kong','HK',22.32,114.17], ['Dongguan','CN',23.02,113.75], ['Hangzhou','CN',30.27,120.15],
+    ['Foshan','CN',23.02,113.12], ['Shenyang','CN',41.80,123.43], ['Riyadh','SA',24.71,46.68],
+    ['Baghdad','IQ',33.32,44.36], ['Santiago','CL',-33.45,-70.67], ['Surat','IN',21.17,72.83],
+    ['Madrid','ES',40.42,-3.70], ['Suzhou','CN',31.30,120.59], ['Pune','IN',18.52,73.86],
+    ['Harbin','CN',45.80,126.53], ['Houston','US',29.76,-95.37], ['Dallas','US',32.78,-96.80],
+    ['Toronto','CA',43.65,-79.38], ['Dar es Salaam','TZ',-6.79,39.21], ['Miami','US',25.76,-80.19],
+    ['Belo Horizonte','BR',-19.92,-43.94], ['Singapore','SG',1.35,103.82], ['Philadelphia','US',39.95,-75.17],
+    ['Atlanta','US',33.75,-84.39], ['Fukuoka','JP',33.59,130.40], ['Khartoum','SD',15.50,32.56],
+    ['Barcelona','ES',41.39,2.17], ['Johannesburg','ZA',-26.20,28.05], ['Saint Petersburg','RU',59.93,30.34],
+    ['Qingdao','CN',36.07,120.38], ['Dalian','CN',38.91,121.61], ['Washington','US',38.91,-77.04],
+    ['Yangon','MM',16.87,96.20], ['Alexandria','EG',31.20,29.92], ['Jinan','CN',36.65,117.12],
+    ['Guadalajara','MX',20.67,-103.35], ['Boston','US',42.36,-71.06], ['Sydney','AU',-33.87,151.21],
+    ['Melbourne','AU',-37.81,144.96], ['Brisbane','AU',-27.47,153.03], ['Perth','AU',-31.95,115.86],
+    ['Adelaide','AU',-34.93,138.60], ['Auckland','NZ',-36.85,174.76], ['Wellington','NZ',-41.29,174.78],
+    ['Berlin','DE',52.52,13.40], ['Rome','IT',41.90,12.50], ['Kyiv','UA',50.45,30.52],
+    ['Vienna','AT',48.21,16.37], ['Warsaw','PL',52.23,21.01], ['Bucharest','RO',44.43,26.10],
+    ['Budapest','HU',47.50,19.04], ['Amsterdam','NL',52.37,4.90], ['Brussels','BE',50.85,4.35],
+    ['Stockholm','SE',59.33,18.07], ['Oslo','NO',59.91,10.75], ['Copenhagen','DK',55.68,12.57],
+    ['Helsinki','FI',60.17,24.94], ['Dublin','IE',53.35,-6.26], ['Lisbon','PT',38.72,-9.14],
+    ['Athens','GR',37.98,23.73], ['Prague','CZ',50.08,14.44], ['Zurich','CH',47.38,8.54],
+    ['Munich','DE',48.14,11.58], ['Milan','IT',45.46,9.19], ['Manchester','GB',53.48,-2.24],
+    ['Edinburgh','GB',55.95,-3.19], ['Reykjavik','IS',64.15,-21.94], ['Minsk','BY',53.90,27.57],
+    ['Belgrade','RS',44.79,20.45], ['Sofia','BG',42.70,23.32], ['Zagreb','HR',45.81,15.98],
+    ['Riga','LV',56.95,24.11], ['Vilnius','LT',54.69,25.28], ['Tallinn','EE',59.44,24.75],
+    ['New York','US',40.71,-74.01], ['Los Angeles','US',34.05,-118.24], ['San Francisco','US',37.77,-122.42],
+    ['Seattle','US',47.61,-122.33], ['Denver','US',39.74,-104.99], ['Phoenix','US',33.45,-112.07],
+    ['Las Vegas','US',36.17,-115.14], ['Detroit','US',42.33,-83.05], ['Minneapolis','US',44.98,-93.27],
+    ['New Orleans','US',29.95,-90.07], ['Anchorage','US',61.22,-149.90], ['Honolulu','US',21.31,-157.86],
+    ['Vancouver','CA',49.28,-123.12], ['Calgary','CA',51.05,-114.07], ['Montreal','CA',45.50,-73.57],
+    ['Ottawa','CA',45.42,-75.70], ['Havana','CU',23.11,-82.37], ['Kingston','JM',17.97,-76.79],
+    ['Panama City','PA',8.98,-79.52], ['San José','CR',9.93,-84.08], ['Guatemala City','GT',14.63,-90.51],
+    ['Monterrey','MX',25.69,-100.32], ['Tijuana','MX',32.51,-117.04], ['Caracas','VE',10.48,-66.90],
+    ['Quito','EC',-0.18,-78.47], ['La Paz','BO',-16.50,-68.15], ['Asunción','PY',-25.26,-57.58],
+    ['Montevideo','UY',-34.90,-56.16], ['Brasília','BR',-15.79,-47.88], ['Salvador','BR',-12.97,-38.50],
+    ['Fortaleza','BR',-3.73,-38.53], ['Manaus','BR',-3.12,-60.02], ['Medellín','CO',6.24,-75.58],
+    ['Cali','CO',3.45,-76.53], ['Nairobi','KE',-1.29,36.82], ['Addis Ababa','ET',9.03,38.74],
+    ['Accra','GH',5.60,-0.19], ['Abidjan','CI',5.36,-4.01], ['Dakar','SN',14.72,-17.47],
+    ['Casablanca','MA',33.57,-7.59], ['Algiers','DZ',36.75,3.06], ['Tunis','TN',36.81,10.17],
+    ['Tripoli','LY',32.89,13.19], ['Cape Town','ZA',-33.92,18.42], ['Durban','ZA',-29.86,31.02],
+    ['Harare','ZW',-17.83,31.05], ['Lusaka','ZM',-15.39,28.32], ['Maputo','MZ',-25.97,32.57],
+    ['Kampala','UG',0.35,32.58], ['Mogadishu','SO',2.05,45.32], ['Antananarivo','MG',-18.88,47.51],
+    ['Ouagadougou','BF',12.37,-1.53], ['Bamako','ML',12.65,-8.00], ['Niamey','NE',13.51,2.11],
+    ['Abuja','NG',9.06,7.49], ['Kano','NG',12.00,8.52], ['Douala','CM',4.05,9.77],
+    ['Windhoek','NA',-22.56,17.08], ['Gaborone','BW',-24.65,25.91], ['Kigali','RW',-1.94,30.06],
+    ['Dubai','AE',25.20,55.27], ['Abu Dhabi','AE',24.45,54.38], ['Doha','QA',25.29,51.53],
+    ['Kuwait City','KW',29.38,47.99], ['Muscat','OM',23.59,58.41], ['Manama','BH',26.23,50.59],
+    ['Amman','JO',31.95,35.93], ['Beirut','LB',33.89,35.50], ['Damascus','SY',33.51,36.29],
+    ['Jerusalem','IL',31.77,35.21], ['Tel Aviv','IL',32.09,34.78], ['Ankara','TR',39.93,32.86],
+    ['Tbilisi','GE',41.72,44.79], ['Yerevan','AM',40.18,44.51], ['Baku','AZ',40.41,49.87],
+    ['Tashkent','UZ',41.30,69.24], ['Almaty','KZ',43.24,76.89], ['Astana','KZ',51.17,71.43],
+    ['Kabul','AF',34.53,69.17], ['Islamabad','PK',33.68,73.05], ['Colombo','LK',6.93,79.86],
+    ['Kathmandu','NP',27.72,85.32], ['Hanoi','VN',21.03,105.85], ['Phnom Penh','KH',11.56,104.92],
+    ['Vientiane','LA',17.97,102.63], ['Taipei','TW',25.03,121.57], ['Pyongyang','KP',39.04,125.76],
+    ['Busan','KR',35.18,129.08], ['Sapporo','JP',43.06,141.35], ['Ulaanbaatar','MN',47.89,106.91],
+    ['Novosibirsk','RU',55.01,82.93], ['Yekaterinburg','RU',56.84,60.61], ['Vladivostok','RU',43.12,131.89],
+    ['Surabaya','ID',-7.25,112.75], ['Bandung','ID',-6.92,107.61], ['Medan','ID',3.59,98.67],
+    ['Cebu','PH',10.32,123.89], ['Port Moresby','PG',-9.44,147.18], ['Suva','FJ',-18.14,178.44],
+    ['Nuuk','GL',64.18,-51.72], ['Ushuaia','AR',-54.80,-68.30], ['Longyearbyen','SJ',78.22,15.65]
+  ].map(function (c) { return { name: c[0], cc: c[1], lat: c[2], lng: c[3] }; });
+
+  /* ════════════════════════════════════════════════════════════
+     MAP
+     ════════════════════════════════════════════════════════════ */
+
+  var ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+  var ESRI_ATTR = '<a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a>, Maxar, Earthstar Geographics, USGS, NASA';
+
+  function esriSource(path, maxzoom) {
+    return { type: 'raster', tiles: ['nlimg://' + ESRI.replace('https://', '') + path + '/MapServer/tile/{z}/{y}/{x}'],
+             tileSize: 256, minzoom: 0, maxzoom: maxzoom, attribution: ESRI_ATTR };
+  }
+
+  /* ── Imagery that runs out ────────────────────────────────────────
+     Past the resolution it holds for a place, the imagery service hands
+     back a grey "map data not yet available" tile rather than a 404 —
+     over open water that starts around zoom 14, which is where a shot
+     comes down. A tile that fails to load leaves the parent on screen,
+     so recognising that grey tile and failing it keeps the last real
+     imagery stretched over the ground instead of the apology.
+
+     The signature is learned rather than hard-coded: two deep-ocean
+     tiles from opposite sides of the Pacific, far past any coverage. If
+     they come back identical, that is the placeholder. If they differ,
+     the service has changed and the filter stays off.
+     ──────────────────────────────────────────────────────────────── */
+  var emptyHashes = Object.create(null);   /* bodies known to be the apology */
+  var emptyTileReady = null;
+
+  function hashBytes(buf) {
+    var b = new Uint8Array(buf), h = 2166136261;
+    for (var i = 0; i < b.length; i++) { h ^= b[i]; h = (h * 16777619) >>> 0; }
+    return b.length + ':' + h;
+  }
+
+  /* Draw a tile down to 8×8 and describe it. The apology is a flat,
+     perfectly neutral light grey; deep water is flat but blue, and real
+     imagery is neither flat nor neutral. */
+  function tileLooksEmpty(buf) {
+    if (buf.byteLength > 6000) return Promise.resolve(false);   /* real imagery is fatter */
+    var blob = new Blob([buf]);
+    var draw = function (src) {
+      var c = document.createElement('canvas');
+      c.width = 8; c.height = 8;
+      var ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(src, 0, 0, 8, 8);
+      var d = ctx.getImageData(0, 0, 8, 8).data;
+      var r = 0, g = 0, b = 0, n = 64, i;
+      for (i = 0; i < n; i++) { r += d[i * 4]; g += d[i * 4 + 1]; b += d[i * 4 + 2]; }
+      r /= n; g /= n; b /= n;
+      var spread = 0;
+      for (i = 0; i < n; i++) {
+        spread = Math.max(spread, Math.abs(d[i * 4] - r), Math.abs(d[i * 4 + 1] - g), Math.abs(d[i * 4 + 2] - b));
+      }
+      var neutral = Math.max(r, g, b) - Math.min(r, g, b);
+      return neutral <= 8 && r > 185 && r < 228 && spread <= 26;
+    };
+    if (typeof createImageBitmap === 'function') {
+      return createImageBitmap(blob).then(draw).catch(function () { return false; });
+    }
+    return new Promise(function (res) {
+      var url = URL.createObjectURL(blob), img = new Image();
+      img.onload = function () { var v = false; try { v = draw(img); } catch (e) {} URL.revokeObjectURL(url); res(v); };
+      img.onerror = function () { URL.revokeObjectURL(url); res(false); };
+      img.src = url;
+    });
+  }
+
+  /* Two tiles from opposite sides of the world, far past any coverage.
+     Identical means we have the apology's fingerprint before the first
+     screenful is judged; if the probe fails, the look of the tile is
+     still enough on its own. */
+  function learnEmptyTile() {
+    if (emptyTileReady) return emptyTileReady;
+    var probes = [
+      ESRI + 'World_Imagery/MapServer/tile/18/131072/21845',   /* mid Pacific */
+      ESRI + 'World_Imagery/MapServer/tile/18/120000/200000'   /* Bay of Bengal */
+    ];
+    emptyTileReady = Promise.all(probes.map(function (u) {
+      return fetch(u).then(function (r) { return r.arrayBuffer(); }).then(hashBytes);
+    })).then(function (h) {
+      if (h[0] === h[1]) emptyHashes[h[0]] = true;
+    }).catch(function () { /* the pixel test carries it alone */ });
+    return emptyTileReady;
+  }
+  learnEmptyTile();
+
+  /* ── Imagery that runs out ────────────────────────────────────────
+     Past the resolution it holds for a place, the imagery service hands
+     back a grey "map data not yet available" tile rather than a 404 —
+     over open water that starts around zoom 14, which is where a shot
+     comes down. A tile that fails to load leaves the parent on screen,
+     so failing those keeps the last real imagery stretched over the
+     ground instead of the apology.
+     ──────────────────────────────────────────────────────────────── */
+  maplibregl.addProtocol('nlimg', function (params, abortController) {
+    var url = params.url.replace(/^nlimg:\/\//, 'https://');
+    return learnEmptyTile()
+      .then(function () { return fetch(url, { signal: abortController.signal }); })
+      .then(function (r) {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.arrayBuffer();
+      })
+      .then(function (buf) {
+        var h = hashBytes(buf);
+        if (emptyHashes[h]) throw new Error('no imagery at this zoom');
+        if (buf.byteLength > 6000) return { data: buf };
+        return tileLooksEmpty(buf).then(function (empty) {
+          if (!empty) return { data: buf };
+          emptyHashes[h] = true;          /* recognise it by hash from now on */
+          throw new Error('no imagery at this zoom');
+        });
+      });
+  });
+
+  var style = {
+    version: 8,
+    name: 'Netherlayer Launch Range',
+    projection: { type: 'globe' },
+    sources: {
+      imagery: esriSource('World_Imagery', 19),
+      topo: esriSource('World_Topo_Map', 19),
+      dark: {
+        type: 'raster',
+        tiles: ['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+                'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+                'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'],
+        tileSize: 256, maxzoom: 19,
+        attribution: '<a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> · &copy; OpenStreetMap contributors'
+      },
+      dem: {
+        type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        tileSize: 256, minzoom: 0, maxzoom: 15, encoding: 'terrarium',
+        attribution: '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> — SRTM / GMTED / NED / ETOPO1'
+      },
+      track: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      buildings: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } }
+    },
+    sky: {
+      'sky-color': '#1b3a63', 'sky-horizon-blend': 0.6,
+      'horizon-color': '#a5c4e6',
+      'fog-color': '#c9d9ec',
+      'fog-ground-blend': ['interpolate', ['linear'], ['zoom'], 7, 0, 11, 0.32, 15, 0.75],
+      'horizon-fog-blend': ['interpolate', ['linear'], ['zoom'], 7, 0.1, 11, 0.4, 15, 0.6],
+      'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 9, 0.5, 13, 0.15]
+    },
+    terrain: { source: 'dem', exaggeration: 1 },
+    layers: [
+      { id: 'space', type: 'background', paint: { 'background-color': '#050510' } },
+      { id: 'imagery', type: 'raster', source: 'imagery' },
+      { id: 'topo', type: 'raster', source: 'topo', layout: { visibility: 'none' } },
+      { id: 'dark', type: 'raster', source: 'dark', layout: { visibility: 'none' } },
+      /* The elevation tiles stop at zoom 15; past that the shading is a
+         stretched wash — a flat cream sheet over anything smooth, which
+         is exactly what the sea floor is. Let it end with its data. */
+      { id: 'hillshade', type: 'hillshade', source: 'dem', maxzoom: 15,
+        paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#0a0a18',
+                 'hillshade-highlight-color': '#fff4d6' } },
+      /* The city it is aimed at, in three dimensions, so the last second
+         of the flight has something to land among. */
+      { id: 'buildings', type: 'fill-extrusion', source: 'buildings',
+        paint: {
+          'fill-extrusion-color': ['interpolate', ['linear'], ['get', 'h'],
+            3, '#4e5466', 25, '#6b7386', 80, '#8e97ad', 200, '#b4bccd'],
+          'fill-extrusion-height': ['get', 'h'],
+          'fill-extrusion-base': ['get', 'base'],
+          'fill-extrusion-opacity': 0.94,
+          'fill-extrusion-vertical-gradient': true
+        } },
+      { id: 'track-glow', type: 'line', source: 'track',
+        paint: { 'line-color': '#e67e22', 'line-width': 7, 'line-opacity': 0.22, 'line-blur': 4 } },
+      { id: 'track-line', type: 'line', source: 'track',
+        paint: { 'line-color': '#f0c040', 'line-width': 1.6, 'line-opacity': 0.85, 'line-dasharray': [3, 2] } }
+    ]
+  };
+
+  var map;
+  try {
+    map = new maplibregl.Map({
+      container: 'map', style: style,
+      center: [-117.85, 34.72], zoom: 13.2, pitch: 62, bearing: 70,
+      maxPitch: 180, maxZoom: 19, antialias: true,
+      attributionControl: { compact: true }
+    });
+  } catch (err) {
+    $('loader').innerHTML = '<div class="t" style="letter-spacing:.08em;max-width:440px;line-height:1.8">' +
+      (typeof maplibregl === 'undefined'
+        ? 'The map library could not be downloaded — check the connection and reload.'
+        : 'This range needs WebGL 2. Try a current Chrome, Firefox, Safari or Edge.') + '</div>';
+    return;
+  }
+
+  window.netherlayerRange = map;
+  window.netherlayerBuild = '2026-08-05';
+  if (window.console) console.log('Netherlayer Launch Range — build 2026-08-05');
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+  /* MapLibre's own scale control measures between two points on the middle
+     row of the canvas. Tilt the camera far enough and that row is sky, the
+     unprojection comes back NaN, and the bar reads "NaN m". Work from the
+     ground resolution at the map centre instead, which is always defined. */
+  function GroundScale() {}
+  GroundScale.prototype.getDefaultPosition = function () { return 'bottom-right'; };
+  GroundScale.prototype.onAdd = function (m) {
+    this._map = m;
+    this._el = document.createElement('div');
+    this._el.className = 'maplibregl-ctrl maplibregl-ctrl-scale';
+    this._tick = this.update.bind(this);
+    m.on('move', this._tick);
+    m.on('moveend', this._tick);
+    this.update();
+    return this._el;
+  };
+  GroundScale.prototype.onRemove = function () {
+    this._map.off('move', this._tick);
+    this._map.off('moveend', this._tick);
+    this._el.remove();
+  };
+  GroundScale.prototype.update = function () {
+    var MAXW = 110;
+    var c = this._map.getCenter();
+    var mpp = 40075016.686 * Math.cos(c.lat * Math.PI / 180) / (512 * Math.pow(2, this._map.getZoom()));
+    var span = mpp * MAXW;
+    if (!isFinite(span) || span <= 0) { this._el.classList.add('unmeasurable'); return; }
+    this._el.classList.remove('unmeasurable');
+    var unit = span >= 1000 ? 'km' : 'm';
+    var v = unit === 'km' ? span / 1000 : span;
+    var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
+    var r = v / p;
+    r = r >= 10 ? 10 : r >= 5 ? 5 : r >= 3 ? 3 : r >= 2 ? 2 : 1;
+    var round = r * p;
+    this._el.style.width = (MAXW * round / v) + 'px';
+    this._el.textContent = (round < 1 ? round.toPrecision(1) : String(round)) + ' ' + unit;
+  };
+  map.addControl(new GroundScale(), 'bottom-right');
+  map.touchZoomRotate.enableRotation();
+  map.dragRotate.enable();
+  map.setCenterClampedToGround(false);
+
+  var toastTimer;
+  function toast(msg, ms) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, ms || 3000);
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     GEOMETRY HELPERS — metres, degrees and the two projections
+     ════════════════════════════════════════════════════════════ */
+
+  var D2R = Math.PI / 180;
+  function metresPerDegree(lat) {
+    var l = lat * D2R;
+    return {
+      lat: 111132.92 - 559.82 * Math.cos(2 * l) + 1.175 * Math.cos(4 * l),
+      lng: Math.max(1e-6, 111412.84 * Math.cos(l) - 93.5 * Math.cos(3 * l))
+    };
+  }
+  /* Move a point by metres east / north / up. */
+  function offsetLL(pt, dE, dN, dU) {
+    var m = metresPerDegree(pt.lat);
+    return { lng: pt.lng + dE / m.lng, lat: pt.lat + dN / m.lat, alt: (pt.alt || 0) + (dU || 0) };
+  }
+  /* Great-circle bearing helpers are not needed: everything comes out of
+     the integrator already positioned. */
+
+  function m4mul(a, b) {
+    var o = new Float64Array(16);
+    for (var c = 0; c < 4; c++) {
+      for (var r = 0; r < 4; r++) {
+        o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] +
+                       a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+      }
+    }
+    return o;
+  }
+  function m4translate(x, y, z) { return new Float64Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]); }
+  function m4scale(x, y, z) { return new Float64Array([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]); }
+  function m3from4(m) { return new Float32Array([m[0],m[1],m[2], m[4],m[5],m[6], m[8],m[9],m[10]]); }
+
+  /* Rotation taking local +z onto a unit direction given in (east, south, up). */
+  function m4aim(d) {
+    var zx = d[0], zy = d[1], zz = d[2];
+    var ax = 0, ay = 0, az = 1;
+    if (Math.abs(zz) > 0.92) { ax = 1; ay = 0; az = 0; }
+    var xx = ay * zz - az * zy, xy = az * zx - ax * zz, xz = ax * zy - ay * zx;
+    var xl = Math.hypot(xx, xy, xz) || 1;
+    xx /= xl; xy /= xl; xz /= xl;
+    var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return new Float64Array([xx,xy,xz,0, yx,yy,yz,0, zx,zy,zz,0, 0,0,0,1]);
+  }
+
+  var GLOBE_RADIUS = 6371008.8;
+  /* Metres → MapLibre's globe space (an earth-radius sphere with the poles
+     on ±y), columns being the local east / south / up axes. */
+  function globeFrame(lng, lat, altitude) {
+    var lam = lng * D2R, phi = lat * D2R;
+    var sl = Math.sin(lam), cl = Math.cos(lam), sp = Math.sin(phi), cp = Math.cos(phi);
+    var up = [sl * cp, sp, cl * cp];
+    var north = [-sl * sp, cp, -cl * sp];
+    var s = 1 / GLOBE_RADIUS, r = 1 + altitude / GLOBE_RADIUS;
+    return new Float64Array([
+      cl * s, 0, -sl * s, 0,
+      -north[0] * s, -north[1] * s, -north[2] * s, 0,
+      up[0] * s, up[1] * s, up[2] * s, 0,
+      up[0] * r, up[1] * r, up[2] * r, 1
+    ]);
+  }
+  function globePoint(lng, lat, alt) {
+    var lam = lng * D2R, phi = lat * D2R, cp = Math.cos(phi);
+    var r = 1 + alt / GLOBE_RADIUS;
+    return [Math.sin(lam) * cp * r, Math.sin(phi) * r, Math.cos(lam) * cp * r];
+  }
+  function mercPoint(lng, lat, alt) {
+    var mc = maplibregl.MercatorCoordinate.fromLngLat({ lng: lng, lat: lat }, alt);
+    return [mc.x, mc.y, mc.z];
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     WEBGL LAYER — the rail, the projectile and the arc
+     ════════════════════════════════════════════════════════════ */
+
+  var SOLID_VERT = [
+    'attribute vec3 a_pos;', 'attribute vec3 a_normal;',
+    'uniform mat4 u_globe, u_globe_model, u_mercator;',
+    'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
+    'uniform mat3 u_normal;', 'varying vec3 v_normal;',
+    'void main() {',
+    '  v_normal = u_normal * a_normal;',
+    '  vec4 onGlobe = u_globe * vec4(a_pos, 1.0);',
+    '  vec3 spherePos = (u_globe_model * vec4(a_pos, 1.0)).xyz;',
+    '  onGlobe.z = (1.0 - (dot(spherePos, u_globe_clip.xyz) + u_globe_clip.w)) * onGlobe.w;',
+    '  vec4 onPlane = u_mercator * vec4(a_pos, 1.0);',
+    '  gl_Position = mix(onPlane, onGlobe, u_transition);',
+    '}'
+  ].join('\n');
+
+  var SOLID_FRAG = [
+    'precision mediump float;',
+    'uniform vec3 u_color;', 'uniform float u_glow;',
+    'varying vec3 v_normal;',
+    'void main() {',
+    '  vec3 n = normalize(v_normal);',
+    '  if (!gl_FrontFacing) n = -n;',
+    '  vec3 sun = normalize(vec3(-0.45, -0.55, 0.70));',
+    '  float lam = max(dot(n, sun), 0.0);',
+    '  vec3 c = u_color * (0.40 + 0.72 * lam);',
+    '  c += vec3(0.55, 0.62, 0.78) * pow(max(n.z, 0.0), 3.0) * 0.14;',
+    /* Air resistance shows: the nose glows as the dynamic pressure climbs. */
+    '  c = mix(c, vec3(1.0, 0.72, 0.32), u_glow * (0.35 + 0.65 * pow(max(dot(n, vec3(0.0,0.0,1.0)), 0.0), 2.0)));',
+    '  gl_FragColor = vec4(c, 1.0);',
+    '}'
+  ].join('\n');
+
+  /* The arc carries a position in each projection so it can be mixed the
+     same way the terrain under it is. */
+  /* City markers: unlit and additive, so they read as light rather than
+     as objects. The column fades out towards its top; the ground disc
+     uses the same mesh with the fade switched off. */
+  var GLOW_VERT = [
+    'attribute vec3 a_pos;',
+    'uniform mat4 u_globe, u_globe_model, u_mercator;',
+    'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
+    'varying float v_up;',
+    'void main() {',
+    '  v_up = a_pos.z + 0.5;',
+    '  vec4 onGlobe = u_globe * vec4(a_pos, 1.0);',
+    '  vec3 spherePos = (u_globe_model * vec4(a_pos, 1.0)).xyz;',
+    '  onGlobe.z = (1.0 - (dot(spherePos, u_globe_clip.xyz) + u_globe_clip.w)) * onGlobe.w;',
+    '  vec4 onPlane = u_mercator * vec4(a_pos, 1.0);',
+    '  gl_Position = mix(onPlane, onGlobe, u_transition);',
+    '}'
+  ].join('\n');
+
+  var GLOW_FRAG = [
+    'precision mediump float;',
+    'uniform vec3 u_color;', 'uniform float u_intensity;', 'uniform float u_fade_up;',
+    'varying float v_up;',
+    'void main() {',
+    '  float a = mix(1.0, 1.0 - v_up, u_fade_up);',
+    '  a = a * a * u_intensity;',
+    '  gl_FragColor = vec4(u_color * a, a);',
+    '}'
+  ].join('\n');
+
+  var PATH_VERT = [
+    'attribute vec3 a_merc;', 'attribute vec3 a_globe;',
+    'attribute vec3 a_off_merc;', 'attribute vec3 a_off_globe;',
+    'attribute float a_s;',
+    'uniform mat4 u_globe, u_mercator;',
+    'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
+    'uniform vec3 u_cam_globe;', 'uniform float u_width;',
+    'varying float v_s;',
+    'void main() {',
+    '  v_s = a_s;',
+    /* Globe space is a uniform sphere, so one distance serves both
+       projections: a trail of constant angular width, not constant
+       metres, which is the only thing that reads at every range. */
+    '  float far = distance(u_cam_globe, a_globe) * 6371008.8;',
+    '  float swell = clamp(far * u_width, 1.5, 60000.0);',
+    '  vec3 gPos = a_globe + a_off_globe * swell;',
+    '  vec3 mPos = a_merc + a_off_merc * swell;',
+    '  vec4 onGlobe = u_globe * vec4(gPos, 1.0);',
+    '  onGlobe.z = (1.0 - (dot(gPos, u_globe_clip.xyz) + u_globe_clip.w)) * onGlobe.w;',
+    '  vec4 onPlane = u_mercator * vec4(mPos, 1.0);',
+    '  gl_Position = mix(onPlane, onGlobe, u_transition);',
+    '}'
+  ].join('\n');
+
+  var PATH_FRAG = [
+    'precision mediump float;',
+    'uniform float u_progress;',
+    'uniform float u_hide_ahead;',
+    'varying float v_s;',
+    'void main() {',
+    '  bool flown = v_s <= u_progress;',
+    /* In flight there is nothing ahead of the nose to see: the arc it
+       has yet to fly would sit right down the barrel of the camera. */
+    '  if (!flown && u_hide_ahead > 0.5) discard;',
+    /* Behind the projectile the trail is hot; ahead of it the prediction
+       is a faint dotted-looking thread. */
+    '  vec3 c = flown ? vec3(1.0, 0.78, 0.35) : vec3(0.45, 0.50, 0.78);',
+    '  float a = flown ? 0.72 : 0.26;',
+    '  gl_FragColor = vec4(c * a, a);',
+    '}'
+  ].join('\n');
+
+  function compile(gl, type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function link(gl, vs, fs) {
+    var p = gl.createProgram();
+    gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  /* Unit solids, axis along +z, spanning -0.5..0.5. */
+  function buildSolids(seg) {
+    var pos = [], nrm = [];
+    function v(x, y, z, nx, ny, nz) { pos.push(x, y, z); nrm.push(nx, ny, nz); }
+    var i, a0, a1, c0, s0, c1, s1;
+
+    var cylAt = 0;
+    for (i = 0; i < seg; i++) {
+      a0 = i / seg * 2 * Math.PI; a1 = (i + 1) / seg * 2 * Math.PI;
+      c0 = Math.cos(a0); s0 = Math.sin(a0); c1 = Math.cos(a1); s1 = Math.sin(a1);
+      v(.5*c0, .5*s0, -.5, c0, s0, 0); v(.5*c1, .5*s1, -.5, c1, s1, 0); v(.5*c1, .5*s1, .5, c1, s1, 0);
+      v(.5*c0, .5*s0, -.5, c0, s0, 0); v(.5*c1, .5*s1, .5, c1, s1, 0); v(.5*c0, .5*s0, .5, c0, s0, 0);
+      v(0, 0, .5, 0, 0, 1); v(.5*c0, .5*s0, .5, 0, 0, 1); v(.5*c1, .5*s1, .5, 0, 0, 1);
+      v(0, 0, -.5, 0, 0, -1); v(.5*c1, .5*s1, -.5, 0, 0, -1); v(.5*c0, .5*s0, -.5, 0, 0, -1);
+    }
+    var cylCount = pos.length / 3;
+
+    /* A dart: cylindrical body for the back two thirds, cone to the nose. */
+    var dartAt = cylCount;
+    for (i = 0; i < seg; i++) {
+      a0 = i / seg * 2 * Math.PI; a1 = (i + 1) / seg * 2 * Math.PI;
+      c0 = Math.cos(a0); s0 = Math.sin(a0); c1 = Math.cos(a1); s1 = Math.sin(a1);
+      var r = 0.18;
+      v(r*c0, r*s0, -.5, c0, s0, 0); v(r*c1, r*s1, -.5, c1, s1, 0); v(r*c1, r*s1, .15, c1, s1, 0);
+      v(r*c0, r*s0, -.5, c0, s0, 0); v(r*c1, r*s1, .15, c1, s1, 0); v(r*c0, r*s0, .15, c0, s0, 0);
+      /* nose cone */
+      v(0, 0, .5, c0 * 0.6, s0 * 0.6, 0.8); v(r*c0, r*s0, .15, c0, s0, 0.3); v(r*c1, r*s1, .15, c1, s1, 0.3);
+      /* tail cap */
+      v(0, 0, -.5, 0, 0, -1); v(r*c1, r*s1, -.5, 0, 0, -1); v(r*c0, r*s0, -.5, 0, 0, -1);
+    }
+    return {
+      pos: new Float32Array(pos), nrm: new Float32Array(nrm),
+      cylinder: { at: cylAt, count: cylCount },
+      dart: { at: dartAt, count: pos.length / 3 - dartAt }
+    };
+  }
+
+  var gfx = null;          /* GL objects, once the layer is added */
+  var pathMesh = null;     /* {mercBuf, globeBuf, sBuf, count} for the current solution */
+  var CITY_OFF = new Float32Array([0.42, 0.72, 1.0]);   /* cold blue-white */
+  var CITY_ON = new Float32Array([1.0, 0.78, 0.35]);    /* the one being aimed at */
+
+  var scene = {            /* what the layer should draw right now */
+    rail: null,            /* {lng, lat, alt, dir[3], length, bore} */
+    projectile: null,      /* {lng, lat, alt, dir[3], size, glow} */
+    cities: [],            /* markers near the middle of the view */
+    progress: 0
+  };
+
+  var rangeLayer = {
+    id: 'range', type: 'custom', renderingMode: '3d',
+
+    onAdd: function (_m, gl) {
+      var solidProg = link(gl, SOLID_VERT, SOLID_FRAG);
+      var pathProg = link(gl, PATH_VERT, PATH_FRAG);
+      var glowProg = link(gl, GLOW_VERT, GLOW_FRAG);
+      var mesh = buildSolids(40);
+      function buf(data) {
+        var b = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, b);
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        return b;
+      }
+      gfx = {
+        solid: {
+          prog: solidProg,
+          posBuf: buf(mesh.pos), nrmBuf: buf(mesh.nrm),
+          parts: { cylinder: mesh.cylinder, dart: mesh.dart },
+          aPos: gl.getAttribLocation(solidProg, 'a_pos'),
+          aNrm: gl.getAttribLocation(solidProg, 'a_normal'),
+          uGlobe: gl.getUniformLocation(solidProg, 'u_globe'),
+          uGlobeModel: gl.getUniformLocation(solidProg, 'u_globe_model'),
+          uMerc: gl.getUniformLocation(solidProg, 'u_mercator'),
+          uClip: gl.getUniformLocation(solidProg, 'u_globe_clip'),
+          uTrans: gl.getUniformLocation(solidProg, 'u_transition'),
+          uNrm: gl.getUniformLocation(solidProg, 'u_normal'),
+          uCol: gl.getUniformLocation(solidProg, 'u_color'),
+          uGlow: gl.getUniformLocation(solidProg, 'u_glow')
+        },
+        glow: {
+          prog: glowProg,
+          aPos: gl.getAttribLocation(glowProg, 'a_pos'),
+          uGlobe: gl.getUniformLocation(glowProg, 'u_globe'),
+          uGlobeModel: gl.getUniformLocation(glowProg, 'u_globe_model'),
+          uMerc: gl.getUniformLocation(glowProg, 'u_mercator'),
+          uClip: gl.getUniformLocation(glowProg, 'u_globe_clip'),
+          uTrans: gl.getUniformLocation(glowProg, 'u_transition'),
+          uCol: gl.getUniformLocation(glowProg, 'u_color'),
+          uIntensity: gl.getUniformLocation(glowProg, 'u_intensity'),
+          uFadeUp: gl.getUniformLocation(glowProg, 'u_fade_up')
+        },
+        path: {
+          prog: pathProg,
+          aMerc: gl.getAttribLocation(pathProg, 'a_merc'),
+          aGlobe: gl.getAttribLocation(pathProg, 'a_globe'),
+          aOffMerc: gl.getAttribLocation(pathProg, 'a_off_merc'),
+          aOffGlobe: gl.getAttribLocation(pathProg, 'a_off_globe'),
+          aS: gl.getAttribLocation(pathProg, 'a_s'),
+          uCam: gl.getUniformLocation(pathProg, 'u_cam_globe'),
+          uWidth: gl.getUniformLocation(pathProg, 'u_width'),
+          uGlobe: gl.getUniformLocation(pathProg, 'u_globe'),
+          uMerc: gl.getUniformLocation(pathProg, 'u_mercator'),
+          uClip: gl.getUniformLocation(pathProg, 'u_globe_clip'),
+          uTrans: gl.getUniformLocation(pathProg, 'u_transition'),
+          uProgress: gl.getUniformLocation(pathProg, 'u_progress'),
+          uHideAhead: gl.getUniformLocation(pathProg, 'u_hide_ahead')
+        },
+        gl: gl
+      };
+    },
+
+    render: function (gl, args) {
+      if (!gfx) return;
+      var pd = args && args.defaultProjectionData;
+      if (!pd || !pd.mainMatrix) return;
+
+      var t = Math.min(1, Math.max(0, pd.projectionTransition || 0));
+      var globeMat = pd.mainMatrix;
+      var mercMat = t > 0 ? (pd.fallbackMatrix || pd.mainMatrix) : pd.mainMatrix;
+      var plane = pd.clippingPlane || [0, 0, 0, 0];
+
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.disable(gl.CULL_FACE);
+
+      /* ── the arc ── */
+      if (pathMesh && pathMesh.count > 1) {
+        var P = gfx.path;
+        gl.useProgram(P.prog);
+        gl.depthMask(false);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.uniformMatrix4fv(P.uGlobe, false, new Float32Array(globeMat));
+        gl.uniformMatrix4fv(P.uMerc, false, new Float32Array(mercMat));
+        gl.uniform4f(P.uClip, plane[0], plane[1], plane[2], plane[3]);
+        gl.uniform1f(P.uTrans, t);
+        gl.uniform1f(P.uProgress, scene.progress);
+        gl.uniform1f(P.uHideAhead, flight.active ? 1 : 0);
+        var eye = cameraEye();
+        var eg = globePoint(eye.lng, eye.lat, eye.alt);
+        gl.uniform3f(P.uCam, eg[0], eg[1], eg[2]);
+        gl.uniform1f(P.uWidth, 0.003);
+        function bindAttr(loc, buffer, size) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+          gl.enableVertexAttribArray(loc);
+          gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+        }
+        bindAttr(P.aMerc, pathMesh.mercBuf, 3);
+        bindAttr(P.aGlobe, pathMesh.globeBuf, 3);
+        bindAttr(P.aOffMerc, pathMesh.offMercBuf, 3);
+        bindAttr(P.aOffGlobe, pathMesh.offGlobeBuf, 3);
+        bindAttr(P.aS, pathMesh.sBuf, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, pathMesh.count);
+        [P.aMerc, P.aGlobe, P.aOffMerc, P.aOffGlobe, P.aS].forEach(function (a) {
+          gl.disableVertexAttribArray(a);
+        });
+      }
+
+      /* ── solids ── */
+      var S = gfx.solid;
+      gl.useProgram(S.prog);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.uniform4f(S.uClip, plane[0], plane[1], plane[2], plane[3]);
+      gl.uniform1f(S.uTrans, t);
+      gl.bindBuffer(gl.ARRAY_BUFFER, S.posBuf);
+      gl.enableVertexAttribArray(S.aPos);
+      gl.vertexAttribPointer(S.aPos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, S.nrmBuf);
+      gl.enableVertexAttribArray(S.aNrm);
+      gl.vertexAttribPointer(S.aNrm, 3, gl.FLOAT, false, 0, 0);
+
+      function drawSolid(part, o, shape, colour, glow) {
+        var rot = m4aim(o.dir);
+        var body = m4mul(rot, m4scale(shape[0], shape[1], shape[2]));
+        var globeModel = m4mul(globeFrame(o.lng, o.lat, o.alt), body);
+        var mc = maplibregl.MercatorCoordinate.fromLngLat({ lng: o.lng, lat: o.lat }, o.alt);
+        var metre = mc.meterInMercatorCoordinateUnits();
+        var mercModel = m4mul(
+          m4mul(m4translate(mc.x, mc.y, mc.z), m4scale(metre, metre, metre)), body);
+        gl.uniformMatrix4fv(S.uMerc, false, new Float32Array(m4mul(mercMat, mercModel)));
+        gl.uniformMatrix4fv(S.uGlobe, false, new Float32Array(m4mul(globeMat, globeModel)));
+        gl.uniformMatrix4fv(S.uGlobeModel, false, new Float32Array(globeModel));
+        gl.uniformMatrix3fv(S.uNrm, false, m3from4(rot));
+        gl.uniform3fv(S.uCol, colour);
+        gl.uniform1f(S.uGlow, glow || 0);
+        gl.drawArrays(gl.TRIANGLES, part.at, part.count);
+      }
+
+      /* ── city markers ── */
+      if (scene.cities.length) {
+        var G = gfx.glow;
+        gl.useProgram(G.prog);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);        /* light adds to what is there */
+        gl.depthMask(false);
+        gl.uniform4f(G.uClip, plane[0], plane[1], plane[2], plane[3]);
+        gl.uniform1f(G.uTrans, t);
+        gl.bindBuffer(gl.ARRAY_BUFFER, S.posBuf);
+        gl.enableVertexAttribArray(G.aPos);
+        gl.vertexAttribPointer(G.aPos, 3, gl.FLOAT, false, 0, 0);
+
+        for (var ci = 0; ci < scene.cities.length; ci++) {
+          var mk = scene.cities[ci];
+          drawGlow(mk, mk.column, 1);         /* the column, fading upward */
+          drawGlow(mk, mk.disc, 0);           /* the mark on the ground */
+        }
+        gl.disableVertexAttribArray(G.aPos);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
+
+      function drawGlow(mk, shape, fadeUp) {
+        if (!shape || shape.intensity <= 0.004) return;
+        var G = gfx.glow;
+        var body = m4scale(shape.width, shape.width, shape.height);
+        var lift = m4translate(0, 0, shape.height / 2);   /* stand it on the ground */
+        var globeModel = m4mul(m4mul(globeFrame(mk.lng, mk.lat, mk.alt), lift), body);
+        var mc = maplibregl.MercatorCoordinate.fromLngLat({ lng: mk.lng, lat: mk.lat }, mk.alt);
+        var metre = mc.meterInMercatorCoordinateUnits();
+        var mercModel = m4mul(m4mul(m4mul(
+          m4translate(mc.x, mc.y, mc.z), m4scale(metre, metre, metre)), lift), body);
+        gl.uniformMatrix4fv(G.uMerc, false, new Float32Array(m4mul(mercMat, mercModel)));
+        gl.uniformMatrix4fv(G.uGlobe, false, new Float32Array(m4mul(globeMat, globeModel)));
+        gl.uniformMatrix4fv(G.uGlobeModel, false, new Float32Array(globeModel));
+        gl.uniform3fv(G.uCol, mk.selected ? CITY_ON : CITY_OFF);
+        gl.uniform1f(G.uIntensity, shape.intensity);
+        gl.uniform1f(G.uFadeUp, fadeUp);
+        gl.drawArrays(gl.TRIANGLES, S.parts.cylinder.at, S.parts.cylinder.count);
+      }
+
+      if (scene.rail) {
+        drawSolid(S.parts.cylinder, scene.rail,
+          [scene.rail.bore, scene.rail.bore, scene.rail.length],
+          new Float32Array([0.72, 0.74, 0.82]), 0);
+      }
+      if (scene.projectile) {
+        var s = scene.projectile.size;
+        drawSolid(S.parts.dart, scene.projectile, [s * 0.34, s * 0.34, s],
+          new Float32Array([0.95, 0.86, 0.55]), scene.projectile.glow || 0);
+      }
+      gl.disableVertexAttribArray(S.aPos);
+      gl.disableVertexAttribArray(S.aNrm);
+    }
+  };
+
+  /* Build the arc: a centreline plus the directions to swell it along.
+     The shader decides how far, from how near the camera is. */
+  function buildPathMesh(points) {
+    if (!gfx || points.length < 2) { pathMesh = null; return; }
+    var gl = gfx.gl;
+    var merc = [], globe = [], offMerc = [], offGlobe = [], svals = [];
+    var RING = 5;
+    var prev = null;
+
+    for (var i = 0; i < points.length; i++) {
+      var p = points[i];
+      var next = points[Math.min(i + 1, points.length - 1)];
+      var back = points[Math.max(i - 1, 0)];
+      var m = metresPerDegree(p.lat);
+      /* direction along the path, in metres east / north / up */
+      var dE = (next.lng - back.lng) * m.lng, dN = (next.lat - back.lat) * m.lat, dU = next.alt - back.alt;
+      var len = Math.hypot(dE, dN, dU) || 1;
+      var dir = [dE / len, dN / len, dU / len];
+      var a = Math.abs(dir[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
+      var u = [a[1] * dir[2] - a[2] * dir[1], a[2] * dir[0] - a[0] * dir[2], a[0] * dir[1] - a[1] * dir[0]];
+      var ul = Math.hypot(u[0], u[1], u[2]) || 1;
+      u = [u[0] / ul, u[1] / ul, u[2] / ul];
+      var w = [dir[1] * u[2] - dir[2] * u[1], dir[2] * u[0] - dir[0] * u[2], dir[0] * u[1] - dir[1] * u[0]];
+
+      /* One metre, expressed in each projection's units, at this point. */
+      var centreMerc = mercPoint(p.lng, p.lat, p.alt);
+      var oneMetre = maplibregl.MercatorCoordinate.fromLngLat({ lng: p.lng, lat: p.lat }, p.alt)
+        .meterInMercatorCoordinateUnits();
+      var gLam = p.lng * D2R, gPhi = p.lat * D2R;
+      var sl = Math.sin(gLam), cl = Math.cos(gLam), sp = Math.sin(gPhi), cp = Math.cos(gPhi);
+      var gEast = [cl, 0, -sl];
+      var gNorth = [-sl * sp, cp, -cl * sp];
+      var gUp = [sl * cp, sp, cl * cp];
+      var gScale = 1 / GLOBE_RADIUS;
+
+      var ring = [];
+      for (var k = 0; k < RING; k++) {
+        var ang = k / RING * 2 * Math.PI;
+        var ca = Math.cos(ang), sa = Math.sin(ang);
+        var oE = u[0] * ca + w[0] * sa, oN = u[1] * ca + w[1] * sa, oU = u[2] * ca + w[2] * sa;
+        ring.push({
+          m: centreMerc,
+          g: globePoint(p.lng, p.lat, p.alt),
+          /* mercator y grows southward, so north flips sign */
+          om: [oE * oneMetre, -oN * oneMetre, oU * oneMetre],
+          og: [(gEast[0] * oE + gNorth[0] * oN + gUp[0] * oU) * gScale,
+               (gEast[1] * oE + gNorth[1] * oN + gUp[1] * oU) * gScale,
+               (gEast[2] * oE + gNorth[2] * oN + gUp[2] * oU) * gScale],
+          s: p.s
+        });
+      }
+      if (prev) {
+        for (k = 0; k < RING; k++) {
+          var k2 = (k + 1) % RING;
+          var quad = [prev[k], prev[k2], ring[k2], prev[k], ring[k2], ring[k]];
+          for (var q = 0; q < quad.length; q++) {
+            var vtx = quad[q];
+            merc.push(vtx.m[0], vtx.m[1], vtx.m[2]);
+            globe.push(vtx.g[0], vtx.g[1], vtx.g[2]);
+            offMerc.push(vtx.om[0], vtx.om[1], vtx.om[2]);
+            offGlobe.push(vtx.og[0], vtx.og[1], vtx.og[2]);
+            svals.push(vtx.s);
+          }
+        }
+      }
+      prev = ring;
+    }
+
+    function upload(arr, existing) {
+      var b = existing || gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+      return b;
+    }
+    pathMesh = {
+      mercBuf: upload(merc, pathMesh && pathMesh.mercBuf),
+      globeBuf: upload(globe, pathMesh && pathMesh.globeBuf),
+      offMercBuf: upload(offMerc, pathMesh && pathMesh.offMercBuf),
+      offGlobeBuf: upload(offGlobe, pathMesh && pathMesh.offGlobeBuf),
+      sBuf: upload(svals, pathMesh && pathMesh.sBuf),
+      count: svals.length
+    };
+  }
+
+  /* Where the eye actually is: the centre, pushed back along the tilt. */
+  function cameraEye() {
+    var c = map.getCenter();
+    var pitch = map.getPitch() * D2R, bearing = map.getBearing() * D2R;
+    var lat = c.lat * D2R;
+    var mpp = 40075016.686 * Math.cos(lat) / (512 * Math.pow(2, map.getZoom()));
+    var c2c = (map.getCanvas().clientHeight / 2) / Math.tan(map.transform.fov * D2R / 2);
+    var d = c2c * mpp;
+    var horiz = d * Math.sin(pitch);
+    return offsetLL(
+      { lng: c.lng, lat: c.lat, alt: map.getCenterElevation() },
+      -Math.sin(bearing) * horiz, -Math.cos(bearing) * horiz, d * Math.cos(pitch));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     THE PAD
+     ════════════════════════════════════════════════════════════ */
+
+  var pad = null;           /* {lng, lat, alt} */
+  var picking = false;
+
+  function setPicking(on) {
+    picking = on;
+    document.body.classList.toggle('placing', on);
+    $('pick').classList.toggle('armed', on);
+    $('pick').textContent = on ? '◎ Click the terrain now' : '◎ Click the terrain to set the pad';
+  }
+
+  function setPad(lngLat) {
+    var raw = map.queryTerrainElevation ? map.queryTerrainElevation(lngLat) : 0;
+    var alt = (raw === null || raw === undefined || !isFinite(raw)) ? 0 : raw;
+    pad = { lng: lngLat.lng, lat: lngLat.lat, alt: alt };
+    $('padline').innerHTML = fmtLat(pad.lat) + ' &nbsp; ' + fmtLon(pad.lng) + ' &nbsp; ' + kmStr(pad.alt) + ' ASL';
+    solve();
+  }
+
+  map.on('click', function (e) {
+    if (!picking || flight.active) return;
+    setPad(e.lngLat);
+    setPicking(false);
+  });
+
+  /* ════════════════════════════════════════════════════════════
+     SOLVING — the same verdict the launcher page gives
+     ════════════════════════════════════════════════════════════ */
+
+  var solution = null;
+
+  function readPositive(el, allowZero) {
+    var v = parseFloat(el.value);
+    var ok = isFinite(v) && (allowZero ? v >= 0 : v > 0);
+    el.classList.toggle('invalid', el.value !== '' && !ok);
+    return ok ? v : NaN;
+  }
+
+  function verdict(kind, text, why) {
+    $('flag').textContent = text;
+    $('flag').className = kind;
+    $('why').innerHTML = why;
+  }
+
+  function solve() {
+    var shape = SHAPES[Number($('shape').value)];
+    var capT = CAPS[Number($('capType').value)];
+
+    var mPay = readPositive($('mPay')) * parseFloat($('mPayUnit').value);
+    var mSabot = readPositive($('mSabot'), true);
+    var dPay = readPositive($('dPay'));
+    var altKm = readPositive($('alt'));
+    var angle = readPositive($('angle'));
+    var azimuth = parseFloat($('azimuth').value);
+    var railLen = readPositive($('rail')) * parseFloat($('railUnit').value);
+    var gap = readPositive($('gap'));
+    var railH = readPositive($('railH'));
+    var cap = readPositive($('cap')) * parseFloat($('capUnit').value);
+    var v0 = readPositive($('volt')) * parseFloat($('voltUnit').value);
+    var resistance = readPositive($('res'), true) * parseFloat($('resUnit').value);
+    var l0 = readPositive($('ind')) * 1e-6;
+
+    solution = null;
+    $('fire').disabled = true;
+    $('stats').innerHTML = '';
+    setTrack(null);
+    scene.rail = null;
+    scene.projectile = null;
+    pathMesh = null;
+    map.triggerRepaint();
+
+    if (!pad) {
+      verdict('', '—', 'Pick a launch pad on the terrain to begin.');
+      return;
+    }
+    var nums = [mPay, mSabot, dPay, altKm, angle, azimuth, railLen, gap, railH, cap, v0, resistance, l0];
+    for (var i = 0; i < nums.length; i++) {
+      if (!isFinite(nums[i])) {
+        verdict('no', 'INCOMPLETE', 'Every field needs a number before this can be solved.');
+        return;
+      }
+    }
+    if (angle >= 90) { verdict('no', 'INVALID', 'Launch angle must be under 90 degrees.'); return; }
+    if (dPay > gap) {
+      verdict('no', 'INVALID', 'A ' + sig(dPay, 3) + ' m payload does not fit a ' + sig(gap, 3) + ' m bore.');
+      return;
+    }
+
+    var lp = inductanceGradient(gap, railH);
+    var bankE = 0.5 * cap * v0 * v0;
+    var mass = mPay + mSabot;
+    var area = Math.PI * dPay * dPay / 4;
+    var cdAm = shape.cd * area / mPay;          /* the sabot is gone by now */
+    var muzzleAlt = pad.alt + railLen * Math.sin(angle * D2R);
+    var targetAlt = altKm * 1000;
+    var vRot = OMEGA * R_E * Math.cos(pad.lat * D2R);
+
+    $('gapHint').textContent = 'Inductance gradient ' + sig(lp * 1e6, 3) + ' µH/m.';
+    $('dPayHint').textContent = sig(area, 3) + ' m² frontal area — drag coefficient ' + shape.cd + '.';
+    $('bankHint').textContent = 'Bank holds ' + eng(bankE, 'J') + '. ' + capT.note;
+    $('padhint').textContent = 'Muzzle sits at ' + kmStr(muzzleAlt) + '. The ground here runs ' +
+      sig(vRot, 4) + ' m/s eastward, and the physics counts it.';
+
+    if (muzzleAlt >= targetAlt) {
+      verdict('no', 'INVALID', 'The muzzle is already at the target altitude.');
+      return;
+    }
+
+    /* Stage 1 */
+    var shot = fireRails({ v0: v0, cap: cap, r: resistance, l0: l0, lp: lp, mass: mass, railLen: railLen });
+    var gPeak = shot.peakF / mass / G0;
+
+    if (!shot.exited) {
+      verdict('no', 'NO — IT NEVER LEAVES THE RAILS',
+        'The bank ran down after <b>' + kmStr(shot.x) + '</b> of a ' + kmStr(railLen) +
+        ' rail, stalled at ' + sig(shot.v / 1000, 3) + ' km/s. More capacitance, more voltage, ' +
+        'or a shorter rail.');
+      renderStats([
+        ['Stall speed', sig(shot.v / 1000, 3) + ' km/s'],
+        ['Peak current', eng(shot.peakI, 'A')],
+        ['Distance', kmStr(shot.x)],
+        ['Bank left', eng(Math.max(shot.Vc, 0), 'V')]
+      ]);
+      return;
+    }
+
+    /* Stage 2 */
+    var flightSol = flyPath({
+      lng: pad.lng, lat: pad.lat, siteAlt: pad.alt,
+      angle: angle, azimuth: azimuth, railLen: railLen,
+      v0: shot.v, cdAm: cdAm, targetAlt: targetAlt
+    });
+
+    /* Positions over the ground, for drawing. */
+    var pts = [];
+    var dur = flightSol.duration || 1;
+    for (i = 0; i < flightSol.samples.length; i++) {
+      var s = flightSol.samples[i];
+      var g = toGeodetic(s.p, s.t);
+      g.s = s.t / dur;
+      pts.push(g);
+    }
+    /* Keep the longitudes running continuously so a shot that crosses the
+       antimeridian does not fold the arc across the map. */
+    for (i = 1; i < pts.length; i++) {
+      while (pts[i].lng - pts[i - 1].lng > 180) pts[i].lng -= 360;
+      while (pts[i].lng - pts[i - 1].lng < -180) pts[i].lng += 360;
+    }
+
+    var rTarget = R_E + targetAlt;
+    var vCirc = Math.sqrt(GM / rTarget);
+    var downrange = groundDistance(pad, pts[pts.length - 1]);
+
+    /* One zoom for the whole time it is out of the atmosphere: wide
+       enough to hold the arc, and never changed, so nothing pops. */
+    var span = Math.max(downrange * 1.4, flightSol.apogee * 3, 400000);
+    var spaceMpp = span / Math.max(400, map.getCanvas().clientWidth);
+    var spaceZoom = Math.log2(40075016.686 * Math.cos(pad.lat * D2R) / (512 * spaceMpp));
+
+    solution = {
+      shot: shot, flight: flightSol, points: pts, mass: mass, mPay: mPay,
+      angle: angle, azimuth: azimuth, railLen: railLen, targetAlt: targetAlt,
+      vCirc: vCirc, gPeak: gPeak, downrange: downrange, dur: dur,
+      spaceZoom: Math.max(1.6, Math.min(6, spaceZoom))
+    };
+
+    buildPathMesh(pts);
+    setTrack(pts);
+    placeRail();
+    scene.progress = 1;
+
+    var ending = flightSol.impact !== null ? 'Back down at'
+               : flightSol.escaped ? 'Leaves Earth by' : 'Coast ends at';
+    renderStats([
+      ['Muzzle velocity', sig(shot.v / 1000, 4) + ' km/s'],
+      ['Apogee', flightSol.escaped ? 'escapes Earth' : kmStr(flightSol.apogee)],
+      ['Speed at target', flightSol.reached ? sig(flightSol.reached.speed / 1000, 4) + ' km/s' : '—'],
+      ['Peak acceleration in the rails', sig(gPeak, 4) + ' g'],
+      ['Peak dynamic pressure, going up', sig(flightSol.maxQ / 1e6, 3) + ' MPa'],
+      ['Peak deceleration, going up', sig(flightSol.maxG, 4) + ' g'],
+      [ending, secs(flightSol.duration)],
+      ['Downrange at that point', kmStr(downrange)]
+    ]);
+
+    if (!flightSol.reached) {
+      verdict('no', 'NO — FALLS SHORT',
+        'Apogee is <b>' + kmStr(flightSol.apogee) + '</b> against a target of <b>' +
+        kmStr(targetAlt) + '</b>. It leaves the muzzle at ' + sig(shot.v / 1000, 4) +
+        ' km/s and the air takes the rest.');
+    } else {
+      var dv = Math.hypot(flightSol.reached.vr, vCirc - flightSol.reached.vt);
+      verdict('yes', 'REACHES THE ALTITUDE',
+        'Arrives at <b>' + kmStr(targetAlt) + '</b> doing <b>' +
+        sig(flightSol.reached.speed / 1000, 4) + ' km/s</b> after ' + secs(flightSol.reached.t) +
+        '. A circular orbit there needs ' + sig(vCirc / 1000, 4) + ' km/s, so a kick stage must ' +
+        'still supply <b>' + sig(dv, 4) + ' m/s</b> — no ballistic shot closes its own orbit.');
+    }
+
+    drawChart();
+    renderAimChip();
+    $('fire').disabled = false;
+    map.triggerRepaint();
+  }
+
+  function renderStats(pairs) {
+    $('stats').innerHTML = pairs.map(function (p) {
+      return '<div><span>' + p[0] + '</span><b>' + p[1] + '</b></div>';
+    }).join('');
+  }
+
+  function groundDistance(a, b) {
+    var la = a.lat * D2R, lb = b.lat * D2R, dl = (b.lng - a.lng) * D2R;
+    var c = Math.sin(la) * Math.sin(lb) + Math.cos(la) * Math.cos(lb) * Math.cos(dl);
+    return R_E * Math.acos(Math.min(1, Math.max(-1, c)));
+  }
+
+  function setTrack(pts) {
+    var data = { type: 'FeatureCollection', features: [] };
+    if (pts && pts.length > 1 && $('showtrack').checked) {
+      data.features.push({
+        type: 'Feature', properties: {},
+        geometry: { type: 'LineString', coordinates: pts.map(function (p) { return [p.lng, p.lat]; }) }
+      });
+    }
+    var src = map.getSource('track');
+    if (src) src.setData(data);
+  }
+
+  function placeRail() {
+    if (!pad || !solution) { scene.rail = null; return; }
+    var th = solution.angle * D2R, az = solution.azimuth * D2R;
+    /* the render frame is east / south / up */
+    var dir = [Math.cos(th) * Math.sin(az), -Math.cos(th) * Math.cos(az), Math.sin(th)];
+    var half = solution.railLen / 2;
+    var mid = offsetLL(pad, dir[0] * half, -dir[1] * half, dir[2] * half);
+    scene.rail = {
+      lng: mid.lng, lat: mid.lat, alt: mid.alt,
+      dir: dir, length: solution.railLen,
+      bore: Math.max(solution.railLen / 90, 6)
+    };
+  }
+
+  /* ─── Chart ─── */
+  function drawChart() {
+    var svg = $('chart');
+    if (!solution) { svg.innerHTML = ''; $('chartnote').innerHTML = '&nbsp;'; return; }
+    var W = 330, H = 168, M = { t: 8, r: 8, b: 22, l: 42 };
+    var pw = W - M.l - M.r, ph = H - M.t - M.b;
+    var pts = solution.flight.samples;
+    var maxT = solution.dur || 1;
+    var maxH = Math.max(solution.flight.apogee, solution.targetAlt) * 1.08;
+    var x = function (t) { return M.l + t / maxT * pw; };
+    var y = function (h) { return M.t + ph - Math.max(0, h) / maxH * ph; };
+
+    var d = pts.map(function (s, i) { return (i ? 'L' : 'M') + x(s.t).toFixed(1) + ' ' + y(s.alt).toFixed(1); }).join(' ');
+    var parts = [];
+    parts.push('<rect x="' + M.l + '" y="' + M.t + '" width="' + pw + '" height="' + ph + '" fill="rgba(10,10,22,.5)" stroke="rgba(212,175,55,.18)"/>');
+    for (var i = 0; i <= 3; i++) {
+      var hv = maxH * i / 3;
+      parts.push('<line x1="' + M.l + '" y1="' + y(hv) + '" x2="' + (M.l + pw) + '" y2="' + y(hv) +
+        '" stroke="rgba(212,175,55,.10)"/>');
+      parts.push('<text x="' + (M.l - 5) + '" y="' + (y(hv) + 3) + '" fill="#7070a0" font-size="8" text-anchor="end">' +
+        sig(hv / 1000, 3) + '</text>');
+    }
+    for (i = 0; i <= 3; i++) {
+      var tv = maxT * i / 3;
+      parts.push('<text x="' + x(tv) + '" y="' + (H - 8) + '" fill="#7070a0" font-size="8" text-anchor="middle">' +
+        (maxT > 120 ? sig(tv / 60, 2) + 'm' : sig(tv, 3) + 's') + '</text>');
+    }
+    if (solution.targetAlt <= maxH) {
+      parts.push('<line x1="' + M.l + '" y1="' + y(solution.targetAlt) + '" x2="' + (M.l + pw) +
+        '" y2="' + y(solution.targetAlt) + '" stroke="#2ecc71" stroke-dasharray="4 3" stroke-width="1"/>');
+    }
+    parts.push('<path d="' + d + '" fill="none" stroke="#f0c040" stroke-width="1.6"/>');
+    parts.push('<circle id="chartdot" cx="' + x(0) + '" cy="' + y(pts[0].alt) + '" r="3.5" fill="#e67e22" stroke="#fff" stroke-width="1"/>');
+    parts.push('<text x="' + (M.l - 5) + '" y="' + (M.t + 8) + '" fill="#7070a0" font-size="8" text-anchor="end">km</text>');
+    svg.innerHTML = parts.join('');
+    $('chartnote').textContent = 'Apogee ' + kmStr(solution.flight.apogee) +
+      ' · target line ' + kmStr(solution.targetAlt) + '.';
+    chartGeom = { x: x, y: y };
+  }
+  var chartGeom = null;
+
+  function moveChartDot(t, alt) {
+    var dot = document.getElementById('chartdot');
+    if (!dot || !chartGeom) return;
+    dot.setAttribute('cx', chartGeom.x(t));
+    dot.setAttribute('cy', chartGeom.y(alt));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     THE FLIGHT
+     ════════════════════════════════════════════════════════════ */
+
+  var CAMERAS = [
+    { id: 'pad', label: 'Pad' },
+    { id: 'chase', label: 'Chase' },
+    { id: 'nose', label: 'Nose' },
+    { id: 'tail', label: 'Tail' },
+    { id: 'orbit', label: 'Orbit (drag)' }
+  ];
+
+  var flight = {
+    active: false, t: 0, rate: 1, playing: false, cam: 'chase',
+    raf: null, last: 0,
+    space: false, spaceBlend: 0,
+    orbit: { az: 150, el: 22, dist: 900 }
+  };
+
+  /* A fiftieth of real time at one end, fifty times it at the other,
+     real time exactly in the middle. */
+  var RATE_DECADES = Math.log10(50);
+  function rateFromSlider(v) {
+    return Math.pow(10, (v / 1000 * 2 - 1) * RATE_DECADES);
+  }
+  function sliderFromRate(r) {
+    return Math.round(1000 * (Math.log10(r) / RATE_DECADES + 1) / 2);
+  }
+  function rateLabel(r) {
+    if (r > 1.04) return (r < 9.5 ? r.toFixed(1) : String(Math.round(r))) + ' × real time';
+    if (r >= 0.96) return 'real time';
+    return '1/' + Math.round(1 / r) + ' × real time';
+  }
+
+  function sampleAt(t) {
+    var s = solution.flight.samples;
+    if (t <= s[0].t) return { s: s[0], next: s[Math.min(1, s.length - 1)], f: 0 };
+    if (t >= s[s.length - 1].t) return { s: s[s.length - 1], next: s[s.length - 1], f: 0 };
+    var lo = 0, hi = s.length - 1;
+    while (hi - lo > 1) {
+      var mid = (lo + hi) >> 1;
+      if (s[mid].t <= t) lo = mid; else hi = mid;
+    }
+    var span = s[hi].t - s[lo].t || 1;
+    return { s: s[lo], next: s[hi], f: (t - s[lo].t) / span };
+  }
+
+  function stateAt(t) {
+    var a = sampleAt(t);
+    var p = [0, 0, 0], v = [0, 0, 0];
+    for (var i = 0; i < 3; i++) {
+      p[i] = a.s.p[i] + (a.next.p[i] - a.s.p[i]) * a.f;
+      v[i] = a.s.v[i] + (a.next.v[i] - a.s.v[i]) * a.f;
+    }
+    var geo = toGeodetic(p, t);
+    /* Velocity relative to the turning ground, which is what the camera
+       and the dart should point along. */
+    var wx = v[0] + OMEGA * p[1], wy = v[1] - OMEGA * p[0], wz = v[2];
+    var lat = geo.lat * D2R, lng0 = Math.atan2(p[1], p[0]);
+    var cl = Math.cos(lat), sl = Math.sin(lat), co = Math.cos(lng0), so = Math.sin(lng0);
+    var east = wx * -so + wy * co;
+    var north = wx * (-sl * co) + wy * (-sl * so) + wz * cl;
+    var up = wx * (cl * co) + wy * (cl * so) + wz * sl;
+    var mag = Math.hypot(east, north, up) || 1;
+    return {
+      t: t, lng: geo.lng, lat: geo.lat, alt: geo.alt,
+      speed: Math.hypot(v[0], v[1], v[2]),
+      airSpeed: mag,
+      dir: [east / mag, north / mag, up / mag],   /* east, north, up */
+      vertical: up,
+      q: a.s.q + (a.next.q - a.s.q) * a.f,
+      g: a.s.g + (a.next.g - a.s.g) * a.f
+    };
+  }
+
+  /* Solve the camera: eye and target as {lng, lat, alt}. */
+  function solveCamera(eye, target) {
+    var m = metresPerDegree(eye.lat);
+    var dE = (target.lng - eye.lng) * m.lng;
+    var dN = (target.lat - eye.lat) * m.lat;
+    var dU = target.alt - eye.alt;
+    var dist = Math.max(1, Math.hypot(dE, dN, dU));
+    var u = [dE / dist, dN / dist, dU / dist];
+    var c2c = (map.getCanvas().clientHeight / 2) / Math.tan(map.transform.fov * D2R / 2);
+    var zoom = Math.log2(40075016.686 * Math.cos(target.lat * D2R) / (512 * (dist / c2c)));
+    /* 0 looks straight down, 90 is level, 180 looks straight up. */
+    var pitch = Math.acos(Math.max(-1, Math.min(1, -u[2]))) / D2R;
+    /* Out of the atmosphere the renderer smears the world across the
+       frame once the camera tips past level, so those shots stop just
+       short of it. */
+    if (eye.alt > 30000) pitch = Math.min(pitch, 88);
+    return {
+      center: [target.lng, target.lat],
+      elevation: target.alt,
+      zoom: Math.max(0.5, Math.min(22, zoom)),
+      pitch: pitch,
+      bearing: Math.atan2(u[0], u[1]) / D2R
+    };
+  }
+  function aimCamera(eye, target) { map.jumpTo(solveCamera(eye, target)); }
+
+  /* ── Above the atmosphere ──────────────────────────────────────────
+     High up and close in, the map has to draw thousands of kilometres of
+     ground through a camera the mercator renderer was never meant to
+     hold, and it tears. So above the Kármán line the range stops
+     pretending: the view pulls out to the globe, the zoom locks, and the
+     shot is watched as an arc over the planet until it comes back down.
+     ────────────────────────────────────────────────────────────────── */
+  var SPACE_ENTER = 100000, SPACE_LEAVE = 88000;
+
+  function spaceCameraParams(st) {
+    var o = flight.orbit;
+    var dragging = flight.cam === 'orbit';
+    return {
+      center: [st.lng, st.lat],
+      elevation: 0,
+      zoom: solution.spaceZoom,                    /* locked while up here */
+      pitch: dragging ? Math.max(0, Math.min(72, 40 - o.el)) : 34,
+      bearing: dragging ? o.az : solution.azimuth
+    };
+  }
+
+  function lerpAngle(a, b, f) {
+    var d = ((b - a + 540) % 360) - 180;
+    return a + d * f;
+  }
+  function blendCamera(a, b, f) {
+    return {
+      center: [a.center[0] + (b.center[0] - a.center[0]) * f,
+               a.center[1] + (b.center[1] - a.center[1]) * f],
+      elevation: a.elevation + (b.elevation - a.elevation) * f,
+      zoom: a.zoom + (b.zoom - a.zoom) * f,
+      pitch: a.pitch + (b.pitch - a.pitch) * f,
+      bearing: lerpAngle(a.bearing, b.bearing, f)
+    };
+  }
+
+  function surfaceCameraParams(st) {
+    var proj = { lng: st.lng, lat: st.lat, alt: st.alt };
+    var d = st.dir;
+    var height = Math.max(1, st.alt - pad.alt);
+
+    if (flight.cam === 'pad') {
+      /* A range tracking camera: anchored by the pad, easing back as the
+         shot climbs so the ground it left stays in the shot. */
+      var az = solution.azimuth * D2R;
+      var back = 80 + solution.railLen * 0.4 + height * 0.22;
+      var eye = offsetLL(pad, -Math.sin(az) * back - Math.cos(az) * back * 0.28,
+                              -Math.cos(az) * back + Math.sin(az) * back * 0.28,
+                              30 + height * 0.02);
+      /* Aim short of the projectile so the horizon stays in view. */
+      return solveCamera(eye, {
+        lng: pad.lng + (proj.lng - pad.lng) * 0.78,
+        lat: pad.lat + (proj.lat - pad.lat) * 0.78,
+        alt: pad.alt + (proj.alt - pad.alt) * 0.7
+      });
+    }
+    if (flight.cam === 'chase') {
+      /* Offset sideways as well as up, or the camera sits inside its own
+         trail and sees nothing else. */
+      var lag = Math.max(140, Math.min(90000, height * 0.3 + 180));
+      var side = [-d[1], d[0], 0];
+      var sl = Math.hypot(side[0], side[1]) || 1;
+      return solveCamera(offsetLL(proj,
+        -d[0] * lag + side[0] / sl * lag * 0.30,
+        -d[1] * lag + side[1] / sl * lag * 0.30,
+        -d[2] * lag + lag * 0.26), proj);
+    }
+    if (flight.cam === 'nose') {
+      var lead = Math.max(60, Math.min(40000, height * 0.06 + 60));
+      return solveCamera(proj, offsetLL(proj, d[0] * lead, d[1] * lead, d[2] * lead));
+    }
+    if (flight.cam === 'tail') {
+      var behind = Math.max(60, Math.min(40000, height * 0.06 + 60));
+      return solveCamera(proj, offsetLL(proj, -d[0] * behind, -d[1] * behind, -d[2] * behind));
+    }
+    /* orbit — the user's own angle on the projectile */
+    var o = flight.orbit;
+    var r = o.dist * Math.max(1, height / 4000);
+    var ca = Math.cos(o.az * D2R), sa = Math.sin(o.az * D2R);
+    var ce = Math.cos(o.el * D2R), se = Math.sin(o.el * D2R);
+    return solveCamera(offsetLL(proj, -sa * ce * r, -ca * ce * r, se * r), proj);
+  }
+
+  function cameraFor(st, dt) {
+    var wantSpace = st.alt > (flight.space ? SPACE_LEAVE : SPACE_ENTER);
+    if (wantSpace !== flight.space) {
+      flight.space = wantSpace;
+      /* Coming back down a few thousand kilometres from where it left,
+         the pad camera would be staring at its own horizon. */
+      if (!wantSpace && flight.cam === 'pad' && groundDistance(pad, st) > 200000) {
+        setCamera('chase');
+        toast('Re-entry is over the horizon from the pad — switching to chase', 3600);
+      } else {
+        setCamera(flight.cam);        /* refresh the readout */
+        toast(wantSpace
+          ? 'Above the Kármán line — pulling out to the globe, zoom locked'
+          : 'Back inside the atmosphere — cameras released', 3200);
+      }
+    }
+    /* Ease across the boundary rather than cutting. */
+    var target = flight.space ? 1 : 0;
+    var step = Math.min(1, Math.max(0.0001, (dt || 0.016)) / 1.1);
+    flight.spaceBlend += (target - flight.spaceBlend) * Math.min(1, step * 4);
+    if (Math.abs(target - flight.spaceBlend) < 0.002) flight.spaceBlend = target;
+
+    var f = flight.spaceBlend;
+    var params;
+    if (f <= 0.001) params = surfaceCameraParams(st);
+    else if (f >= 0.999) params = spaceCameraParams(st);
+    else params = blendCamera(surfaceCameraParams(st), spaceCameraParams(st), f);
+    map.jumpTo(params);
+  }
+
+  /* Low down and tilted over, the terrain mesh stops short of the real
+     horizon and leaves a sliver of bare canvas against the sky. */
+  function updateVoid() {
+    var eye = cameraEye();
+    var haze = eye.alt < 40000 && map.getPitch() > 45 && map.getZoom() > 8;
+    $('map').style.background = haze ? '#a9c5e2' : '#05050c';
+  }
+  map.on('move', updateVoid);
+
+  function updateFlightVisuals(st) {
+    /* Distance to the eye decides how big the dart has to be drawn to
+       stay visible; a real 3 m dart is a sub-pixel speck from 40 km. */
+    var eye = cameraEye();
+    var m = metresPerDegree(st.lat);
+    var dist = Math.max(20, Math.hypot(
+      (eye.lng - st.lng) * m.lng, (eye.lat - st.lat) * m.lat, eye.alt - st.alt));
+    var size = Math.max(4, Math.min(6000, dist / 80));
+    if (flight.cam === 'nose' || flight.cam === 'tail') size = 0;   /* we are riding it */
+
+    scene.projectile = size > 0 ? {
+      lng: st.lng, lat: st.lat, alt: st.alt,
+      dir: [st.dir[0], -st.dir[1], st.dir[2]],       /* east, south, up */
+      size: size,
+      glow: Math.min(1, st.q / 3e5)
+    } : null;
+    scene.progress = st.t / solution.dur;
+    map.triggerRepaint();
+
+    $('h-t').textContent = secs(st.t);
+    $('h-alt').textContent = kmStr(st.alt);
+    $('h-spd').textContent = sig(st.speed / 1000, 4) + ' km/s';
+    $('h-rng').textContent = kmStr(groundDistance(pad, st));
+    $('h-vv').textContent = sig(st.vertical / 1000, 3) + ' km/s';
+    $('h-q').textContent = st.q > 1e5 ? sig(st.q / 1e6, 3) + ' MPa' : sig(st.q / 1000, 3) + ' kPa';
+    $('h-g').textContent = sig(st.g, 3) + ' g';
+    moveChartDot(st.t, st.alt);
+    $('scrub').value = String(Math.round(1000 * st.t / solution.dur));
+  }
+
+  function frame(now) {
+    if (!flight.active) return;
+    var dt = flight.last ? (now - flight.last) / 1000 : 0;
+    flight.last = now;
+    if (flight.playing) {
+      flight.t += Math.min(0.25, dt) * flight.rate;
+      if (flight.t >= solution.dur) {
+        flight.t = solution.dur;
+        flight.playing = false;
+        $('playpause').textContent = '▶ Replay';
+        var end = solution.flight.reached ? 'Target altitude reached.' :
+          (solution.flight.impact !== null ? 'Back on the ground after ' + secs(solution.dur) + '.' :
+           'Coast ended after ' + secs(solution.dur) + '.');
+        toast(end, 4000);
+      }
+    }
+    var st = stateAt(flight.t);
+    cameraFor(st, dt);
+    updateFlightVisuals(st);
+    flight.raf = requestAnimationFrame(frame);
+  }
+
+  function startFlight() {
+    if (!solution) return;
+    flight.active = true;
+    flight.space = false;
+    flight.spaceBlend = 0;
+    flight.t = 0;
+    flight.playing = true;
+    flight.last = 0;
+    document.body.classList.add('flying');
+    updateCities();                       /* markers stand down for the flight */
+    map.setCenterClampedToGround(false);
+    map.dragPan.disable(); map.scrollZoom.disable();
+    map.dragRotate.disable(); map.touchZoomRotate.disable(); map.keyboard.disable();
+    map.doubleClickZoom.disable();
+
+    setCamera(solution.shot.v > 12000 ? 'chase' : 'pad');
+    $('playpause').textContent = '❚❚ Pause';
+    flight.raf = requestAnimationFrame(frame);
+  }
+
+  function endFlight() {
+    flight.active = false;
+    flight.playing = false;
+    if (flight.raf) cancelAnimationFrame(flight.raf);
+    flight.raf = null;
+    document.body.classList.remove('flying');
+    map.dragPan.enable(); map.scrollZoom.enable();
+    map.dragRotate.enable(); map.touchZoomRotate.enable(); map.keyboard.enable();
+    map.doubleClickZoom.enable();
+    scene.projectile = null;
+    setTimeout(updateCities, 60);
+    scene.progress = 1;
+    map.triggerRepaint();
+    if (solution) lookAtRange();
+  }
+
+  /* A view that takes in the pad and the arc. */
+  function lookAtRange() {
+    if (!solution || !pad) return;
+    var pts = solution.points;
+    var apex = pts[0];
+    for (var i = 0; i < pts.length; i++) if (pts[i].alt > apex.alt) apex = pts[i];
+    var span = Math.max(groundDistance(pad, pts[pts.length - 1]), solution.flight.apogee, 8000);
+    var az = solution.azimuth * D2R;
+    var eye = offsetLL(pad, -Math.sin(az) * span * 0.75, -Math.cos(az) * span * 0.75, span * 0.55);
+    aimCamera(eye, { lng: apex.lng, lat: apex.lat, alt: apex.alt * 0.6 });
+  }
+
+  function setCamera(id) {
+    flight.cam = id;
+    var kids = $('cams').children;
+    for (var i = 0; i < kids.length; i++) kids[i].classList.toggle('on', kids[i].dataset.cam === id);
+    var label = CAMERAS.filter(function (c) { return c.id === id; })[0];
+    var name = label ? label.label.replace(' (drag)', '') : '—';
+    $('h-cam').textContent = flight.space ? 'Globe · locked' : name;
+    $('cams').classList.toggle('waiting', !!flight.space);
+  }
+
+  CAMERAS.forEach(function (c) {
+    var b = document.createElement('button');
+    b.className = 'cam';
+    b.type = 'button';
+    b.dataset.cam = c.id;
+    b.textContent = c.label;
+    b.addEventListener('click', function () { setCamera(c.id); });
+    $('cams').appendChild(b);
+  });
+
+  /* Orbit camera dragging — the map's own handlers are off while flying. */
+  (function () {
+    var down = false, lx = 0, ly = 0;
+    var canvas = map.getCanvas();
+    canvas.addEventListener('pointerdown', function (e) {
+      if (!flight.active || flight.cam !== 'orbit') return;
+      down = true; lx = e.clientX; ly = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!down) return;
+      flight.orbit.az = (flight.orbit.az + (e.clientX - lx) * 0.4 + 360) % 360;
+      flight.orbit.el = Math.max(-70, Math.min(80, flight.orbit.el + (e.clientY - ly) * 0.3));
+      lx = e.clientX; ly = e.clientY;
+    });
+    canvas.addEventListener('pointerup', function () { down = false; });
+    canvas.addEventListener('wheel', function (e) {
+      if (!flight.active || flight.cam !== 'orbit') return;
+      e.preventDefault();
+      flight.orbit.dist = Math.max(60, Math.min(400000, flight.orbit.dist * Math.exp(e.deltaY * 0.001)));
+    }, { passive: false });
+  })();
+
+
+  /* ════════════════════════════════════════════════════════════
+     CITIES ON THE GLOBE
+     A column of light where each city stands, lit by how close it is
+     to the middle of the view — so the globe is not a pincushion, and
+     whatever you are looking at announces itself. Close in the column
+     gives way to a glow on the ground at the city centre.
+     ════════════════════════════════════════════════════════════ */
+
+  var focusedCity = null;      /* nearest the crosshairs right now */
+  var aimedCity = null;        /* the one the launcher was pointed at */
+
+  function bearingTo(from, to) {
+    var f1 = from.lat * D2R, f2 = to.lat * D2R, dl = (to.lng - from.lng) * D2R;
+    var y = Math.sin(dl) * Math.cos(f2);
+    var x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+    return (Math.atan2(y, x) / D2R + 360) % 360;
+  }
+
+  function updateCities() {
+    if (!$('showcities').checked || flight.active) {
+      if (scene.cities.length) { scene.cities = []; map.triggerRepaint(); }
+      focusedCity = null;
+      $('aimchip').hidden = true;
+      return;
+    }
+    var canvas = map.getCanvas();
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    var cx = w / 2, cy = h / 2;
+    var reach = 0.46 * Math.min(w, h);          /* how far from the middle still counts */
+    var eye = cameraEye();
+    var occluded = map.transform && map.transform.isLocationOccluded
+      ? map.transform.isLocationOccluded.bind(map.transform) : null;
+
+    var lit = [];
+    for (var i = 0; i < CITIES.length; i++) {
+      var c = CITIES[i];
+      if (occluded && occluded({ lng: c.lng, lat: c.lat })) continue;   /* round the back */
+      var p;
+      try { p = map.project({ lng: c.lng, lat: c.lat }); } catch (e) { continue; }
+      if (!p || !isFinite(p.x)) continue;
+      if (p.x < -w || p.x > 2 * w || p.y < -h || p.y > 2 * h) continue;
+      var r = Math.hypot(p.x - cx, p.y - cy);
+      if (r > reach) continue;
+      var focus = 1 - r / reach;
+
+      var m = metresPerDegree(c.lat);
+      var far = Math.max(200, Math.hypot(
+        (eye.lng - c.lng) * m.lng, (eye.lat - c.lat) * m.lat, eye.alt));
+
+      /* A column tall enough to see from orbit and wide enough to read
+         at that range, a mark small enough to stand on a street. Both
+         are sized by angle — by how far away the eye is — so they hold
+         the same presence at 8000 km as at 800 m. The column gives way
+         to the mark between 60 km and 12 km out. */
+      var toGround = 1 - Math.min(1, Math.max(0, (far - 12000) / 48000));   /* 1 close in */
+      var colHeight = Math.max(4000, Math.min(700000, far * 0.055));
+      var colWidth = Math.max(400, Math.min(45000, far * 0.005));
+      var discWidth = Math.max(120, Math.min(8000, far * 0.03));
+      /* Stand it on the ground, not at sea level, or a city on a hill
+         buries its own marker in the terrain when you get close. */
+      var ground = 0;
+      if (toGround > 0.02 && map.queryTerrainElevation) {
+        var g = map.queryTerrainElevation({ lng: c.lng, lat: c.lat });
+        if (g !== null && g !== undefined && isFinite(g)) ground = g;
+      }
+      lit.push({
+        name: c.name, cc: c.cc, lng: c.lng, lat: c.lat, alt: ground + 4,
+        focus: focus, far: far, screen: p, selected: false,
+        column: { width: colWidth, height: colHeight,
+                  intensity: 0.85 * focus * focus * (1 - toGround) },
+        disc: { width: discWidth, height: discWidth * 0.22,
+                intensity: 0.9 * Math.pow(focus, 1.5) * toGround }
+      });
+    }
+    lit.sort(function (a, b) { return b.focus - a.focus; });
+    if (lit.length > 30) lit.length = 30;
+
+    focusedCity = lit.length && lit[0].focus > 0.12 ? lit[0] : null;
+    if (focusedCity) focusedCity.selected = true;
+    scene.cities = lit;
+    map.triggerRepaint();
+    renderAimChip();
+  }
+
+  function renderAimChip() {
+    var chip = $('aimchip');
+    if (!focusedCity || !pad) { chip.hidden = true; return; }
+    chip.hidden = false;
+    $('aim-who').textContent = focusedCity.name + ', ' + focusedCity.cc;
+    var range = groundDistance(pad, focusedCity);
+    var brg = bearingTo(pad, focusedCity);
+    var reachNote = '';
+    if (solution && solution.downrange) {
+      var over = solution.downrange - range;
+      reachNote = Math.abs(over) < range * 0.03 ? ' · on range'
+        : over > 0 ? ' · ' + kmStr(over) + ' long' : ' · ' + kmStr(-over) + ' short';
+    }
+    $('aim-how').textContent = kmStr(range) + ' · ' + Math.round(brg) + '°' + reachNote;
+    $('aim-go').disabled = false;
+  }
+
+  function aimAtCity(city) {
+    if (!city || !pad) return;
+    aimedCity = { name: city.name, cc: city.cc, lng: city.lng, lat: city.lat };
+    var brg = bearingTo(pad, city);
+    aimChanged(brg);
+    toast('Aimed at ' + city.name + ' — ' + Math.round(brg) + '°, ' +
+          kmStr(groundDistance(pad, city)) + ' away', 3200);
+  }
+
+  $('aim-go').addEventListener('click', function () { aimAtCity(focusedCity); });
+  $('showcities').addEventListener('change', updateCities);
+
+  /* Clicking a marker aims at it, unless a pad is being placed. */
+  map.on('click', function (e) {
+    if (picking || flight.active || !scene.cities.length) return;
+    var best = null, bestD = 34;
+    for (var i = 0; i < scene.cities.length; i++) {
+      var c = scene.cities[i];
+      var d = Math.hypot(c.screen.x - e.point.x, c.screen.y - e.point.y);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best) aimAtCity(best);
+  });
+
+  var cityTimer = null;
+  map.on('move', function () {
+    clearTimeout(cityTimer);
+    cityTimer = setTimeout(updateCities, 90);
+  });
+  map.on('moveend', updateCities);
+
+
+  /* ════════════════════════════════════════════════════════════
+     THE CITY IT LANDS IN
+     Building footprints and heights straight from OpenStreetMap, for a
+     square kilometre or so around where the shot comes down. Fetched
+     during the count, so the last seconds of the flight have something
+     standing in them.
+     ════════════════════════════════════════════════════════════ */
+
+  var townscape = { key: null, count: 0, place: null, busy: false };
+
+  function nearestCity(pt, within) {
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < CITIES.length; i++) {
+      var d = groundDistance(pt, CITIES[i]);
+      if (d < bestD) { bestD = d; best = CITIES[i]; }
+    }
+    return best && bestD <= within ? { city: best, distance: bestD } : null;
+  }
+
+  /* Where the buildings should go. Where it lands, if that is anywhere
+     near a city — that is the ground the last second of the flight is
+     spent over. Otherwise the city it was aimed at, which is the one
+     the player chose and may yet be reached with a bigger bank. */
+  function buildingSite() {
+    if (!$('showbuildings').checked) return null;
+    if (solution && solution.points && solution.points.length) {
+      var end = solution.points[solution.points.length - 1];
+      var near = nearestCity(end, 40000);
+      if (near) return { lng: end.lng, lat: end.lat, name: near.city.name, cc: near.city.cc };
+    }
+    if (aimedCity) {
+      return { lng: aimedCity.lng, lat: aimedCity.lat, name: aimedCity.name, cc: aimedCity.cc };
+    }
+    if (focusedCity) {
+      return { lng: focusedCity.lng, lat: focusedCity.lat, name: focusedCity.name, cc: focusedCity.cc };
+    }
+    return null;
+  }
+
+  function osmToGeoJSON(json) {
+    var features = [];
+    var els = (json && json.elements) || [];
+    for (var i = 0; i < els.length && features.length < 8000; i++) {
+      var el = els[i];
+      if (el.type !== 'way' || !el.geometry || el.geometry.length < 4) continue;
+      var ring = [];
+      for (var k = 0; k < el.geometry.length; k++) ring.push([el.geometry[k].lon, el.geometry[k].lat]);
+      var first = ring[0], last = ring[ring.length - 1];
+      if (first[0] !== last[0] || first[1] !== last[1]) ring.push([first[0], first[1]]);
+      var t = el.tags || {};
+      var h = parseFloat(t.height);
+      if (!isFinite(h)) {
+        var levels = parseFloat(t['building:levels']);
+        h = isFinite(levels) ? levels * 3.2 : 8;
+      }
+      var base = parseFloat(t.min_height);
+      features.push({
+        type: 'Feature',
+        properties: { h: Math.max(3, Math.min(700, h)), base: isFinite(base) ? base : 0 },
+        geometry: { type: 'Polygon', coordinates: [ring] }
+      });
+    }
+    return { type: 'FeatureCollection', features: features };
+  }
+
+  var OVERPASS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter'
+  ];
+
+  function loadTownscape(site, onDone) {
+    if (!site) { onDone(0); return; }
+    var key = site.lat.toFixed(3) + ',' + site.lng.toFixed(3);
+    if (townscape.key === key) { onDone(townscape.count); return; }
+    if (townscape.busy) { onDone(0); return; }
+    townscape.busy = true;
+
+    var query = '[out:json][timeout:20];(way["building"](around:900,' +
+      site.lat.toFixed(5) + ',' + site.lng.toFixed(5) + '););out geom;';
+    var attempt = 0;
+
+    function tryOne() {
+      if (attempt >= OVERPASS.length) { finish(0, true); return; }
+      var url = OVERPASS[attempt++];
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(query)
+      })
+        .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+        .then(function (json) {
+          var geo = osmToGeoJSON(json);
+          var src = map.getSource('buildings');
+          if (src) src.setData(geo);
+          townscape.key = key;
+          townscape.count = geo.features.length;
+          townscape.place = site;
+          finish(geo.features.length, false);
+        })
+        .catch(function () { tryOne(); });
+    }
+
+    var settled = false;
+    function finish(count, failed) {
+      if (settled) return;
+      settled = true;
+      townscape.busy = false;
+      if (failed) toast('Could not reach the building data for ' + site.name + ' — flying without it', 3600);
+      onDone(count);
+    }
+    /* Never let a slow map service hold up a launch. */
+    setTimeout(function () { finish(0, false); }, 12000);
+    tryOne();
+  }
+
+  function clearTownscape() {
+    var src = map.getSource('buildings');
+    if (src) src.setData({ type: 'FeatureCollection', features: [] });
+    townscape.key = null;
+    townscape.count = 0;
+  }
+
+  $('showbuildings').addEventListener('change', function (e) {
+    map.setLayoutProperty('buildings', 'visibility', e.target.checked ? 'visible' : 'none');
+    if (!e.target.checked) clearTownscape();
+  });
+
+  /* ════════════════════════════════════════════════════════════
+     THE COUNT
+     Ten seconds of theatre with a job to do: pull the tiles the
+     flight is about to cross into the browser cache so the ground
+     is already there when the camera arrives.
+     ════════════════════════════════════════════════════════════ */
+
+  var countdown = { timer: null, left: 0, running: false, loaded: 0, built: 0 };
+
+  function lngLatToTile(lng, lat, z) {
+    var n = Math.pow(2, z);
+    var x = Math.floor((((lng + 180) % 360 + 360) % 360) / 360 * n);
+    var l = Math.max(-85.05, Math.min(85.05, lat)) * D2R;
+    var y = Math.floor((1 - Math.log(Math.tan(l) + 1 / Math.cos(l)) / Math.PI) / 2 * n);
+    return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
+  }
+
+  function tilesForFlight() {
+    var style = map.getStyle();
+    var base = ['imagery', 'topo', 'dark'].filter(function (id) {
+      return map.getLayoutProperty(id, 'visibility') !== 'none';
+    })[0] || 'imagery';
+    var templates = [style.sources[base].tiles[0], style.sources.dem.tiles[0]];
+    var pts = solution.points;
+    var urls = [], seen = {};
+
+    /* Sample the ground track densely near the pad, where the camera is
+       low and the detail is high, and sparsely once the ground is a
+       long way below. */
+    var STEPS = 24;
+    for (var i = 0; i < STEPS; i++) {
+      var p = pts[Math.min(pts.length - 1, Math.round(i / (STEPS - 1) * (pts.length - 1)))];
+      /* Detail at both ends: the pad it leaves and the ground it lands on. */
+      var zooms = i < 4 ? [11, 13, 15]
+                : i > STEPS - 4 ? [12, 14, 16]
+                : i < 12 ? [10, 12, 14] : [9, 11, 13];
+      for (var zi = 0; zi < zooms.length; zi++) {
+        var z = zooms[zi];
+        var t = lngLatToTile(p.lng, p.lat, z);
+        for (var dx = -1; dx <= 1; dx++) {
+          for (var dy = -1; dy <= 1; dy++) {
+            /* neighbours only at the coarsest level, and only edge-on */
+            if (zi > 0 && (dx || dy)) continue;
+            if (dx && dy) continue;
+            var n = Math.pow(2, z);
+            var tx = ((t.x + dx) % n + n) % n, ty = t.y + dy;
+            if (ty < 0 || ty >= n) continue;
+            for (var ti = 0; ti < templates.length; ti++) {
+              var url = templates[ti]
+                .replace(/^nlimg:\/\//, 'https://')
+                .replace('{z}', z).replace('{x}', tx).replace('{y}', ty);
+              if (seen[url]) continue;
+              seen[url] = 1;
+              urls.push(url);
+            }
+          }
+        }
+      }
+    }
+    return urls;
+  }
+
+  /* Warm the HTTP cache: the map asks for these same URLs moments later. */
+  function preloadTiles(urls, onProgress) {
+    var done = 0, at = 0, LANES = 4, stopped = false;
+    function next() {
+      if (stopped || at >= urls.length) return;
+      var url = urls[at++];
+      fetch(url, { mode: 'cors', cache: 'force-cache' })
+        .then(function (r) { return r.blob(); })
+        .catch(function () { /* a missing tile is not worth stopping for */ })
+        .then(function () {
+          done++;
+          onProgress(done / urls.length);
+          next();
+        });
+    }
+    for (var i = 0; i < LANES; i++) next();
+    return function () { stopped = true; };
+  }
+
+  function beginCountdown() {
+    if (!solution || countdown.running || flight.active) return;
+    countdown.running = true;
+    countdown.left = 10;
+    $('fire').disabled = true;
+    $('countdown').hidden = false;
+    $('cd-num').classList.remove('go');
+    $('cd-num').textContent = '10';
+    $('cd-cap').textContent = 'Loading the ground along the flight path';
+    $('cd-fill').style.width = '0%';
+
+    /* Start the clock before doing any work, so a slow machine eats into
+       the count rather than delaying it. Read the clock rather than
+       counting ticks: loading the ground can stall a frame, and a timer
+       that caught up in a burst would sprint through the count. */
+    /* Set the pace now, so it is on screen before the shot goes. */
+    var fast = solution.shot.v > 12000;
+    flight.rate = fast ? 0.05 : 1;
+    $('rate').value = String(sliderFromRate(flight.rate));
+    $('ratelbl').textContent = rateLabel(flight.rate);
+    if (fast) {
+      toast('Muzzle velocity ' + sig(solution.shot.v / 1000, 3) +
+            ' km/s — starting at 1/20 real time so the flight is watchable.', 5000);
+    }
+
+    var t0 = performance.now();
+    var stopPreload = null;
+    /* The count is the slower of two things: ten seconds on the clock,
+       and the ground loading. It cannot outrun the clock, so there is
+       always at least ten seconds of it, and it cannot outrun the
+       tiles, so zero lands when the last one does. */
+    countdown.timer = setInterval(function () {
+      var byClock = Math.ceil(10 - (performance.now() - t0) / 1000);
+      var ready = 0.75 * countdown.loaded + 0.25 * countdown.built;
+      var byGround = Math.ceil(10 * (1 - ready));
+      var left = Math.max(byClock, byGround);
+      if (left > 0) {
+        if (left !== countdown.left) {
+          countdown.left = left;
+          $('cd-num').textContent = String(left);
+        }
+        $('cd-num').classList.toggle('holding', byGround > byClock);
+        return;
+      }
+      $('cd-num').classList.remove('holding');
+      clearInterval(countdown.timer);
+      countdown.timer = null;
+      $('cd-num').textContent = 'LAUNCH';
+      $('cd-num').classList.add('go');
+      setTimeout(function () {
+        countdown.running = false;
+        if (stopPreload) stopPreload();
+        $('countdown').hidden = true;
+        $('fire').disabled = false;
+        startFlight();
+      }, 700);
+    }, 100);
+
+    /* Now the work the count exists to cover. */
+    setTimeout(function () {
+      if (!countdown.running) return;
+      countdown.loaded = 0;
+      countdown.built = 0;
+
+      /* Raise the city it is aimed at while the ground loads. */
+      var site = buildingSite();
+      if (!site) {
+        countdown.built = 1;
+      } else {
+        loadTownscape(site, function (count) {
+          countdown.built = 1;
+          if (count) toast(count.toLocaleString() + ' buildings standing in ' + site.name, 3600);
+        });
+      }
+
+      var urls = tilesForFlight();
+      var total = urls.length;
+      if (!total) { countdown.loaded = 1; return; }
+      $('cd-cap').textContent = 'Loading ' + total + ' tiles along the flight path';
+      stopPreload = preloadTiles(urls, function (frac) {
+        countdown.loaded = frac;
+        $('cd-fill').style.width = Math.round(frac * 100) + '%';
+        $('cd-cap').textContent = frac < 1
+          ? 'Loading the ground \u2014 ' + Math.round(frac * total) + ' of ' + total + ' tiles'
+          : countdown.built < 1
+            ? 'Ground loaded \u2014 raising ' + (site ? site.name : 'the target')
+            : 'Ground loaded \u2014 standing by';
+      });
+
+      /* Hold the pad shot while it counts. */
+      setCamera('pad');
+      var th = solution.angle * D2R, az = solution.azimuth * D2R;
+      var muzzle = offsetLL(pad,
+        Math.cos(th) * Math.sin(az) * solution.railLen,
+        Math.cos(th) * Math.cos(az) * solution.railLen,
+        Math.sin(th) * solution.railLen);
+      var back = 120 + solution.railLen * 0.5;
+      aimCamera(offsetLL(pad, -Math.sin(az) * back - Math.cos(az) * back * 0.3,
+                              -Math.cos(az) * back + Math.sin(az) * back * 0.3, 40), muzzle);
+    }, 0);
+  }
+
+  function abortCountdown() {
+    if (!countdown.running) return;
+    if (countdown.timer) clearInterval(countdown.timer);
+    countdown.timer = null;
+    countdown.running = false;
+    $('countdown').hidden = true;
+    $('fire').disabled = false;
+  }
+
+  $('cd-skip').addEventListener('click', function () {
+    if (!countdown.running) return;
+    if (countdown.timer) clearInterval(countdown.timer);
+    countdown.timer = null;
+    countdown.running = false;
+    $('countdown').hidden = true;
+    $('fire').disabled = false;
+    startFlight();
+  });
+
+  /* ─── Flight controls ─── */
+  $('fire').addEventListener('click', function () {
+    if (!solution) return;
+    setPicking(false);
+    beginCountdown();
+  });
+  $('reset').addEventListener('click', endFlight);
+  $('playpause').addEventListener('click', function () {
+    if (!flight.active) return;
+    if (flight.t >= solution.dur) flight.t = 0;
+    flight.playing = !flight.playing;
+    $('playpause').textContent = flight.playing ? '❚❚ Pause' : '▶ Play';
+  });
+  $('apogeebtn').addEventListener('click', function () {
+    if (!flight.active) return;
+    var best = solution.flight.samples[0];
+    solution.flight.samples.forEach(function (s) { if (s.alt > best.alt) best = s; });
+    flight.t = best.t;
+  });
+  $('endbtn').addEventListener('click', function () {
+    if (flight.active) flight.t = solution.dur;
+  });
+  $('rate').addEventListener('input', function (e) {
+    flight.rate = rateFromSlider(Number(e.target.value));
+    $('ratelbl').textContent = rateLabel(flight.rate);
+  });
+  $('scrub').addEventListener('input', function (e) {
+    if (!flight.active) return;
+    flight.playing = false;
+    $('playpause').textContent = '▶ Play';
+    flight.t = Number(e.target.value) / 1000 * solution.dur;
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.key === 'Escape') {
+      if (countdown.running) abortCountdown();
+      else if (picking) setPicking(false);
+      else if (flight.active) endFlight();
+    }
+    else if (e.key === ' ' && flight.active) { e.preventDefault(); $('playpause').click(); }
+    else if (flight.active && e.key >= '1' && e.key <= '5') setCamera(CAMERAS[Number(e.key) - 1].id);
+  });
+
+  /* ════════════════════════════════════════════════════════════
+     UI WIRING
+     ════════════════════════════════════════════════════════════ */
+
+  SHAPES.forEach(function (s, i) { $('shape').add(new Option(s.name, String(i))); });
+  CAPS.forEach(function (c, i) { $('capType').add(new Option(c.name, String(i))); });
+  DESTS.forEach(function (d, i) { $('dest').add(new Option(d.name, String(i))); });
+  $('shape').value = '0'; $('capType').value = '0'; $('dest').value = '2';
+
+  var COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  function azLabel(a) {
+    return String(Math.round(a)).padStart(3, '0') + '° · ' + COMPASS[Math.round(a / 22.5) % 16];
+  }
+  function syncAzimuth(a, from) {
+    a = ((Math.round(a) % 360) + 360) % 360;
+    if (from !== 'box') $('azimuth').value = String(a);
+    if (from !== 'dial') $('azdial').value = String(a);
+    $('azlbl').textContent = azLabel(a);
+    var kids = $('compass').children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].classList.toggle('on', Number(kids[i].dataset.az) === a);
+    }
+  }
+  /* Dragging the dial re-solves the whole flight, so hold it to one
+     solve per pause rather than one per pixel. A timer, not a frame
+     callback: frames stop arriving when the map is idle. */
+  var aimTimer = null;
+  function aimChanged(a, from) {
+    syncAzimuth(a, from);
+    clearTimeout(aimTimer);
+    aimTimer = setTimeout(solve, 40);
+  }
+  $('azdial').addEventListener('input', function (e) { aimChanged(Number(e.target.value), 'dial'); });
+  $('azimuth').addEventListener('input', function (e) { aimChanged(Number(e.target.value), 'box'); });
+  Array.prototype.forEach.call($('compass').children, function (b) {
+    b.addEventListener('click', function () { aimChanged(Number(b.dataset.az)); });
+  });
+
+  $('pick').addEventListener('click', function () { setPicking(!picking); });
+  $('dest').addEventListener('change', function () {
+    var d = DESTS[Number($('dest').value)];
+    if (d.alt !== null) $('alt').value = String(d.alt);
+    solve();
+  });
+  $('alt').addEventListener('input', function () { $('dest').value = '0'; solve(); });
+  ['mPay','mPayUnit','mSabot','dPay','shape','angle','rail','railUnit','gap','railH',
+   'capType','cap','capUnit','volt','voltUnit','res','resUnit','ind'].forEach(function (id) {
+    $(id).addEventListener('input', solve);
+    $(id).addEventListener('change', solve);
+  });
+  $('showtrack').addEventListener('change', function () {
+    setTrack(solution ? solution.points : null);
+  });
+  $('basemap').addEventListener('change', function (e) {
+    ['imagery', 'topo', 'dark'].forEach(function (id) {
+      map.setLayoutProperty(id, 'visibility', id === e.target.value ? 'visible' : 'none');
+    });
+  });
+
+  var panel = $('panel'), panelBtn = $('panel-btn');
+  panelBtn.addEventListener('click', function () {
+    panel.classList.remove('collapsed');
+    panelBtn.classList.remove('show');
+  });
+  map.on('click', function () {
+    if (window.innerWidth < 720 && !panel.classList.contains('collapsed') && !picking) {
+      panel.classList.add('collapsed');
+      panelBtn.classList.add('show');
+    }
+  });
+  window.addEventListener('resize', function () {
+    if (window.innerWidth >= 720) { panel.classList.remove('collapsed'); panelBtn.classList.remove('show'); }
+  });
+
+  /* ════════════════════════════════════════════════════════════
+     BOOT
+     ════════════════════════════════════════════════════════════ */
+
+  map.on('load', function () {
+    map.setTerrain({ source: 'dem', exaggeration: 1 });
+    map.addLayer(rangeLayer);
+    map.setVerticalFieldOfView(48);
+    $('loader').classList.add('gone');
+    setTimeout(function () { $('loader').style.display = 'none'; }, 800);
+    if (window.innerWidth < 720) { panel.classList.add('collapsed'); panelBtn.classList.add('show'); }
+    setCamera('chase');
+    updateCities();
+
+    /* Wait for the terrain under the default view, then set a starting pad
+       so the page opens with something solved rather than empty. */
+    var tries = 0;
+    var seed = setInterval(function () {
+      var here = map.getCenter();
+      var h = map.queryTerrainElevation(here);
+      if ((h !== null && h !== undefined && isFinite(h)) || ++tries > 40) {
+        clearInterval(seed);
+        setPad(here);
+        toast('Pad set where the map opened — click "set the pad" to move it.', 4500);
+      }
+    }, 400);
+  });
+
+  var demErrors = 0;
+  map.on('error', function (e) {
+    var msg = (e && e.error && e.error.message) || '';
+    if (/terrarium|elevation-tiles/.test(msg) && ++demErrors === 12) {
+      toast('Some elevation tiles failed to load — the pad height may be rough here.');
+    }
+  });
+})();
+</script>
+</body>
+</html>
