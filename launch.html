@@ -671,6 +671,22 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var sampleEvery = 0.02, nextSample = 0;
     var impact = null, escaped = false;
 
+    /* The last few kilometres are the ones anybody watches, and by then the
+       thinned sampling is coarse enough to leave the shot hanging in the air.
+       Record every step of the run-in separately, where the thinning cannot
+       reach it, and close on the ground exactly. */
+    var TERMINAL = 12000;
+    var tail = [];
+    /* The ground the shot comes down on is the ground underneath it, which is
+       not the pad's. Ask the terrain as it descends — every kilometre, close
+       enough to follow the landscape without making the solve expensive. Where
+       nothing is loaded to ask, sea level is the better guess: it is exactly
+       right over water and out by a few hundred metres over most land, where
+       carrying the pad's own elevation across a continent is out by whatever
+       the pad happens to stand on. Erring low buries the last metre of the
+       arc in the hillside, which is the forgiving way to be wrong. */
+    var floor = 0, nextFloorCheck = TERMINAL + 2000;
+
     while (t < 20000) {
       var r = Math.hypot(pos[0], pos[1], pos[2]);
       var alt = r - R_E;
@@ -696,9 +712,24 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         if (aDrag / G0 > maxG) maxG = aDrag / G0;
       }
 
-      if (t >= nextSample) {
-        samples.push({ t: t, p: [pos[0], pos[1], pos[2]], v: [vel[0], vel[1], vel[2]],
-                       alt: alt, q: q, g: aDrag / G0 });
+      if (vr < 0 && alt < nextFloorCheck) {
+        nextFloorCheck = alt - 1000;
+        var under = p.ground ? p.ground(toGeodetic(pos, t)) : null;
+        if (under !== null && isFinite(under)) floor = under;
+      }
+
+      var here = { t: t, p: [pos[0], pos[1], pos[2]], v: [vel[0], vel[1], vel[2]],
+                   alt: alt, q: q, g: aDrag / G0 };
+
+      if (vr < 0 && alt - floor < TERMINAL) {
+        tail.push(here);
+        if (tail.length > 1600) {                    /* a very slow drop */
+          var halved = [];
+          for (var k2 = 0; k2 < tail.length; k2 += 2) halved.push(tail[k2]);
+          tail = halved;
+        }
+      } else if (t >= nextSample) {
+        samples.push(here);
         nextSample = t + sampleEvery;
         if (samples.length >= 2400) {
           var thinned = [];
@@ -709,7 +740,17 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       }
 
       /* Down again, out of the world, or out of patience. */
-      if (alt <= p.siteAlt && vr < 0) { impact = t; break; }
+      if (alt <= floor && vr < 0) {
+        /* Touch down on the ground itself rather than wherever the last
+           whole step happened to leave it. */
+        var above = tail.length > 1 ? tail[tail.length - 2]
+                  : samples.length ? samples[samples.length - 1] : null;
+        if (above && above.alt > floor && above.alt > alt) {
+          tail[tail.length - 1] = lerpSample(above, here, (above.alt - floor) / (above.alt - alt));
+        }
+        impact = tail.length ? tail[tail.length - 1].t : t;
+        break;
+      }
       var energy = 0.5 * (vel[0]*vel[0] + vel[1]*vel[1] + vel[2]*vel[2]) - GM / r;
       if (energy >= 0 && alt > Math.max(3 * p.targetAlt, 400000)) { escaped = true; break; }
 
@@ -728,9 +769,28 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       t += dt;
     }
 
+    /* The run-in goes on the end, and anything the coarse sampling had
+       already put in that stretch comes off. */
+    if (tail.length) {
+      while (samples.length && samples[samples.length - 1].t >= tail[0].t) samples.pop();
+      samples = samples.concat(tail);
+    }
+
     return { samples: samples, apogee: apogee, reached: reached, maxQ: maxQ, maxG: maxG,
              duration: samples.length ? samples[samples.length - 1].t : 0,
              impact: impact, escaped: escaped, startAlt: startAlt };
+  }
+
+  /* Two states either side of the ground, and where between them it lands. */
+  function lerpSample(a, b, f) {
+    f = Math.max(0, Math.min(1, f));
+    var mix = function (x, y) { return x + (y - x) * f; };
+    return {
+      t: mix(a.t, b.t),
+      p: [mix(a.p[0], b.p[0]), mix(a.p[1], b.p[1]), mix(a.p[2], b.p[2])],
+      v: [mix(a.v[0], b.v[0]), mix(a.v[1], b.v[1]), mix(a.v[2], b.v[2])],
+      alt: mix(a.alt, b.alt), q: mix(a.q, b.q), g: mix(a.g, b.g)
+    };
   }
 
   /* Inertial position → where it is over the turning Earth. */
@@ -1242,7 +1302,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     'uniform mat4 u_globe, u_mercator;',
     'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
     'uniform vec3 u_cam_globe;', 'uniform float u_width;',
-    'varying float v_s;',
+    /* s is a fraction of a whole flight and the head of the trail is a
+       sliver of it, so both stages have to agree on highp. */
+    'uniform highp float u_progress;',
+    'uniform highp float u_head_stop;', 'uniform highp float u_head_taper;',
+    'varying highp float v_s;',
     'void main() {',
     '  v_s = a_s;',
     /* Globe space is a uniform sphere, so one distance serves both
@@ -1250,6 +1314,14 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
        metres, which is the only thing that reads at every range. */
     '  float far = distance(u_cam_globe, a_globe) * 6371008.8;',
     '  float swell = clamp(far * u_width, 1.5, 60000.0);',
+    /* The tube is drawn several times wider than the dart so that it reads
+       from orbit. Left blunt, that end cap sits across the nose. Pinch it
+       out to nothing a little way behind the projectile instead, so the
+       trail comes to a point at the tail and never crosses in front. */
+    '  if (u_head_taper > 0.0) {',
+    '    float lead = u_progress - a_s;',
+    '    swell *= clamp((lead - u_head_stop) / u_head_taper, 0.0, 1.0);',
+    '  }',
     '  vec3 gPos = a_globe + a_off_globe * swell;',
     '  vec3 mPos = a_merc + a_off_merc * swell;',
     '  vec4 onGlobe = u_globe * vec4(gPos, 1.0);',
@@ -1261,9 +1333,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
   var PATH_FRAG = [
     'precision mediump float;',
-    'uniform float u_progress;',
+    'uniform highp float u_progress;',
     'uniform float u_hide_ahead;',
-    'varying float v_s;',
+    'varying highp float v_s;',
     'void main() {',
     '  bool flown = v_s <= u_progress;',
     /* In flight there is nothing ahead of the nose to see: the arc it
@@ -1338,7 +1410,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     rail: null,            /* {lng, lat, alt, dir[3], length, bore} */
     projectile: null,      /* {lng, lat, alt, dir[3], size, glow} */
     cities: [],            /* markers near the middle of the view */
-    progress: 0
+    progress: 0,
+    headStop: 0,           /* how far behind the nose the trail stops, in s */
+    headTaper: 0           /* and how much of it is spent narrowing to a point */
   };
 
   var rangeLayer = {
@@ -1397,7 +1471,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
           uClip: gl.getUniformLocation(pathProg, 'u_globe_clip'),
           uTrans: gl.getUniformLocation(pathProg, 'u_transition'),
           uProgress: gl.getUniformLocation(pathProg, 'u_progress'),
-          uHideAhead: gl.getUniformLocation(pathProg, 'u_hide_ahead')
+          uHideAhead: gl.getUniformLocation(pathProg, 'u_hide_ahead'),
+          uHeadStop: gl.getUniformLocation(pathProg, 'u_head_stop'),
+          uHeadTaper: gl.getUniformLocation(pathProg, 'u_head_taper')
         },
         gl: gl
       };
@@ -1430,6 +1506,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         gl.uniform1f(P.uTrans, t);
         gl.uniform1f(P.uProgress, scene.progress);
         gl.uniform1f(P.uHideAhead, flight.active ? 1 : 0);
+        gl.uniform1f(P.uHeadStop, scene.headStop);
+        gl.uniform1f(P.uHeadTaper, scene.headTaper);
         var eye = cameraEye();
         var eg = globePoint(eye.lng, eye.lat, eye.alt);
         gl.uniform3f(P.uCam, eg[0], eg[1], eg[2]);
@@ -1650,6 +1728,15 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     $('pick').textContent = on ? '◎ Click the terrain now' : '◎ Click the terrain to set the pad';
   }
 
+  /* The ground at a point, if the terrain for it happens to be loaded.
+     Nothing loaded means nothing known — the integrator keeps whatever
+     floor it had rather than guessing. */
+  function groundUnder(g) {
+    if (!map.queryTerrainElevation) return null;
+    var h = map.queryTerrainElevation({ lng: g.lng, lat: g.lat });
+    return (h === null || h === undefined || !isFinite(h)) ? null : h;
+  }
+
   function setPad(lngLat) {
     var raw = map.queryTerrainElevation ? map.queryTerrainElevation(lngLat) : 0;
     var alt = (raw === null || raw === undefined || !isFinite(raw)) ? 0 : raw;
@@ -1769,7 +1856,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var flightSol = flyPath({
       lng: pad.lng, lat: pad.lat, siteAlt: pad.alt,
       angle: angle, azimuth: azimuth, railLen: railLen,
-      v0: shot.v, cdAm: cdAm, targetAlt: targetAlt
+      v0: shot.v, cdAm: cdAm, targetAlt: targetAlt, ground: groundUnder
     });
 
     /* Positions over the ground, for drawing. */
@@ -1809,6 +1896,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     setTrack(pts);
     placeRail();
     scene.progress = 1;
+    scene.headStop = scene.headTaper = 0;
 
     var ending = flightSol.impact !== null ? 'Back down at'
                : flightSol.escaped ? 'Leaves Earth by' : 'Coast ends at';
@@ -2169,6 +2257,15 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       glow: Math.min(1, st.q / 3e5)
     } : null;
     scene.progress = st.t / solution.dur;
+
+    /* Where the trail has to stop, expressed the way the mesh is indexed:
+       in units of s, which runs with time. The tube's radius up at the head
+       is the same 0.003 × distance the shader uses, so hold it clear of the
+       nose by a couple of radii and narrow it over a few more. */
+    var swellM = Math.max(1.5, 0.003 * dist);
+    var perS = Math.max(1, st.speed) * solution.dur;   /* metres per unit s */
+    scene.headStop = 2.2 * swellM / perS;
+    scene.headTaper = 6 * swellM / perS;
     map.triggerRepaint();
 
     $('h-t').textContent = secs(st.t);
@@ -2236,6 +2333,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     scene.projectile = null;
     setTimeout(updateCities, 60);
     scene.progress = 1;
+    scene.headStop = scene.headTaper = 0;   /* the resting arc keeps its full width */
     map.triggerRepaint();
     if (solution) lookAtRange();
   }
@@ -2585,9 +2683,21 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     /* Sample the ground track densely near the pad, where the camera is
        low and the detail is high, and sparsely once the ground is a
        long way below. */
+    /* Step along the flight by time, not by array index: the run-in to the
+       ground is sampled far more densely than the rest, so counting entries
+       would crowd a quarter of the stops into the last few kilometres. */
+    function atFraction(f) {
+      var lo = 0, hi = pts.length - 1;
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (pts[mid].s < f) lo = mid + 1; else hi = mid;
+      }
+      return pts[lo];
+    }
+
     var STEPS = 24;
     for (var i = 0; i < STEPS; i++) {
-      var p = pts[Math.min(pts.length - 1, Math.round(i / (STEPS - 1) * (pts.length - 1)))];
+      var p = atFraction(i / (STEPS - 1));
       /* Detail at both ends: the pad it leaves and the ground it lands on. */
       var zooms = i < 4 ? [11, 13, 15]
                 : i > STEPS - 4 ? [12, 14, 16]
