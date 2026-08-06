@@ -95,9 +95,14 @@ body.flying #panel { max-height: calc(100% - 210px); }
 #confoot .btn.fire { margin-top: 0; }
 
 /* ─── Station rail: the knobs live behind these ─── */
+/* Sticky, so whichever station is open the way to the others is still
+   under your thumb. */
 #stations {
+  position: sticky; top: 0; z-index: 2;
   display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px;
-  padding: 10px 12px 0; border-top: 1px solid rgba(212,175,55,.12);
+  padding: 10px 12px 8px; border-top: 1px solid rgba(212,175,55,.12);
+  background: rgba(14,14,28,.97);
+  box-shadow: 0 6px 12px -6px rgba(7,7,15,.9);
 }
 .stn {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
@@ -299,8 +304,18 @@ input[type=range]::-moz-range-thumb { width: 15px; height: 15px; border: none; b
 }
 #cost-note { font-size: 10px; color: #6f6f9a; margin-top: 7px; line-height: 1.55; }
 
-@media (max-width: 1100px) { #chartcard { display: none; } }
-@media (max-width: 860px) { #rightrail { display: none; } }
+@media (max-width: 1180px) { #rightrail #chartcard { display: none; } }
+@media (max-width: 940px) { #rightrail { display: none; } }
+/* The cost and arc stations only exist when the right-hand rail does not. */
+.stn.narrow-only { display: none; }
+@media (max-width: 940px) { .stn.narrow-only { display: flex; } }
+@media (max-width: 1180px) and (min-width: 941px) {
+  .stn.narrow-only[data-pane="p-arc"] { display: flex; }
+}
+#p-cost > *, #p-arc > * { margin: 0; }
+#p-cost #costcard, #p-arc #chartcard {
+  background: none; border: 0; box-shadow: none; padding: 0; backdrop-filter: none;
+}
 
 /* ─── Flight HUD ─── */
 #hud {
@@ -339,11 +354,58 @@ body:not(.flying) #flightbar { display: none; }
 .flightbtns { display: flex; gap: 6px; margin-top: 9px; }
 .flightbtns .btn { padding: 6px 8px; font-size: 11px; }
 
-@media (max-width: 720px) {
-  #hud { grid-template-columns: repeat(4, minmax(48px, auto)); gap: 1px 10px; padding: 7px 11px; }
-  #hud .v { font-size: 11.5px; }
+/* ─── Portrait, hand-held ───────────────────────────────────────────────
+   One column: the map on top, the console as a sheet along the bottom
+   that can be pushed out of the way. Nothing overlaps anything. */
+@media (max-width: 780px) {
+  #panel {
+    top: auto; bottom: 0; left: 0; right: 0; width: auto;
+    max-height: 62vh; border-radius: 18px 18px 0 0;
+    border-top: 2px solid rgba(212,175,55,.55);
+  }
+  body.flying #panel { display: none; }
+  #panel::after {
+    content: ''; position: absolute; top: 6px; left: 50%; margin-left: -18px;
+    width: 36px; height: 3px; border-radius: 3px; background: rgba(212,175,55,.35);
+  }
+  #conhead { padding-top: 15px; }
+  #stations { grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .stn { padding: 9px 0 8px; }
+  .stn i { font-size: 17px; }
+  #deck { padding-bottom: 4px; }
+  .knob { flex: 1 1 40%; max-width: none; }
+  .kdial { width: 96px; height: 96px; }
+  .kstep { width: 24px; height: 24px; font-size: 14px; }
+  .seg button { padding: 9px 10px; font-size: 12px; }
+  .tgl { padding: 9px 0; font-size: 13px; }
+  .btn { padding: 12px; font-size: 13.5px; }
+
+  /* The console is a sheet, so the button that summons it sits above it. */
+  #panel-btn {
+    top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; height: 46px;
+    border-radius: 14px; font-size: 13px; font-weight: 700; letter-spacing: .14em;
+  }
+  body.flying #panel-btn { display: none !important; }
+
+  /* Nothing to read until something is flying, and the sheet wants the
+     room, so the readout only appears when it has numbers. */
+  body:not(.flying) #hud { display: none; }
+  #hud {
+    left: 8px; right: 8px; bottom: 8px; width: auto;
+    grid-template-columns: repeat(4, 1fr); gap: 1px 8px; padding: 8px 11px;
+  }
+  #hud .v { font-size: 12px; }
   #hud .k { font-size: 8px; }
-  body.flying #hud { bottom: 176px; }
+  #flightbar { width: calc(100% - 16px); left: 8px; transform: none; bottom: 8px; padding: 9px 11px; }
+  body.flying #hud { bottom: auto; top: 62px; }
+  .flightbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .cams { gap: 5px; }
+  .cam { padding: 7px 10px; }
+  #aimchip { max-width: calc(100% - 24px); flex-wrap: wrap; }
+}
+@media (max-width: 780px) and (max-height: 620px) {
+  #panel { max-height: 74vh; }
+  body.flying #hud { top: 56px; }
 }
 
 /* ─── Panel toggle ─── */
@@ -354,6 +416,8 @@ body:not(.flying) #flightbar { display: none; }
   color: var(--gold); font-size: 17px;
 }
 #panel-btn.show { display: flex; }
+#panel-btn .wideword { display: none; }
+@media (max-width: 780px) { #panel-btn .wideword { display: inline; } }
 body.placing .maplibregl-canvas { cursor: crosshair; }
 
 /* ─── City in the crosshairs ─── */
@@ -463,6 +527,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     <button type="button" class="stn" data-pane="p-round"><i>➤</i><em>Round</em></button>
     <button type="button" class="stn" data-pane="p-target"><i>⌖</i><em>Target</em></button>
     <button type="button" class="stn" data-pane="p-scene"><i>☰</i><em>Scene</em></button>
+    <button type="button" class="stn narrow-only" data-pane="p-cost"><i>$</i><em>Cost</em></button>
+    <button type="button" class="stn narrow-only" data-pane="p-arc"><i>◠</i><em>Arc</em></button>
   </div>
 
   <div id="deck">
@@ -538,12 +604,23 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     </section>
 
     <section class="pane" id="p-target" hidden>
-      <div class="knobs">
-        <div class="knob wide" data-bind="alt" data-min="10" data-max="2000" data-step="5"
-             data-label="Target altitude" data-unit="km"></div>
+      <div class="seg" data-bind="mission"></div>
+      <div id="m-orbital">
+        <div class="knobs" style="margin-top:10px">
+          <div class="knob wide" data-bind="alt" data-min="10" data-max="2000" data-step="5"
+               data-label="Target altitude" data-unit="km"></div>
+        </div>
+        <div class="seg-h">Standard orbits</div>
+        <div class="seg stack" data-bind="dest"></div>
       </div>
-      <div class="seg-h">Standard orbits</div>
-      <div class="seg stack" data-bind="dest"></div>
+      <div id="m-ground" hidden>
+        <div class="knobs" style="margin-top:10px">
+          <div class="knob wide" data-bind="range" data-min="1" data-max="12000" data-step="1"
+               data-label="Target range" data-unit="km"></div>
+        </div>
+        <button class="btn" id="trim">◈ Trim the bank to the target</button>
+        <p class="hint" id="groundHint">&nbsp;</p>
+      </div>
     </section>
 
     <section class="pane" id="p-scene" hidden>
@@ -561,6 +638,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         uses is the height you see. <span class="build">Build 2026-08-05</span>
       </p>
     </section>
+
+    <!-- On a narrow screen the right-hand cards move in here. -->
+    <section class="pane" id="p-cost" hidden></section>
+    <section class="pane" id="p-arc" hidden></section>
   </div>
   </div>
 
@@ -568,7 +649,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     <button class="btn fire" id="fire" disabled>▲ LAUNCH</button>
   </div>
 </div>
-<div id="panel-btn" class="nm" title="Show the console">☰</div>
+<div id="panel-btn" class="nm" title="Show the console">☰&nbsp;<span class="wideword">CONSOLE</span></div>
 
 <!-- ── The numbers the console turns. The solver reads these. ── -->
 <div id="model">
@@ -582,7 +663,12 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   <input type="number" id="dPay" value="0.3" min="0" step="any"/>
   <select id="shape"></select>
   <select id="dest"></select>
+  <select id="mission">
+    <option value="orbital">Orbital shot</option>
+    <option value="ground">Terrestrial</option>
+  </select>
   <input type="number" id="alt" value="200" min="0" step="any"/>
+  <input type="number" id="range" value="500" min="1" step="1"/>
   <input type="number" id="rail" value="1000" min="0" step="any"/>
   <select id="railUnit"><option value="1">m</option><option value="1000">km</option></select>
   <input type="number" id="gap" value="0.5" min="0" step="any"/>
@@ -2472,10 +2558,16 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     }
   }
 
+  var justPicked = false;
   map.on('click', function (e) {
     if (!picking || flight.active) return;
     setPad(e.lngLat);
     setPicking(false);
+    /* The city handler runs after this one and would otherwise see a
+       click on open ground as a click on whatever marker it landed near,
+       so a pad dropped on a city would silently aim at that city too. */
+    justPicked = true;
+    setTimeout(function () { justPicked = false; }, 0);
   });
 
   /* ════════════════════════════════════════════════════════════
@@ -2518,6 +2610,12 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var v0 = readPositive($('volt')) * parseFloat($('voltUnit').value);
     var resistance = readPositive($('res'), true) * parseFloat($('resUnit').value);
     var l0 = readPositive($('ind')) * 1e-6;
+    /* Two different questions. An orbital shot is judged on the altitude it
+       reaches; a terrestrial one does not care how high it went, only
+       whether it came down where it was sent. */
+    var orbital = $('mission').value !== 'ground';
+    $('m-orbital').hidden = !orbital;
+    $('m-ground').hidden = orbital;
 
     solution = null;
     $('fire').disabled = true;
@@ -2566,7 +2664,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     $('padhint').textContent = 'Muzzle sits at ' + kmStr(muzzleAlt) + '. The ground here runs ' +
       sig(vRot, 4) + ' m/s eastward, and the physics counts it.';
 
-    if (muzzleAlt >= targetAlt) {
+    if (orbital && muzzleAlt >= targetAlt) {
       verdict('no', 'INVALID', 'The muzzle is already at the target altitude.');
       return;
     }
@@ -2645,9 +2743,23 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       shot: shot, flight: flightSol, points: pts, mass: mass, mPay: mPay,
       angle: angle, azimuth: azimuth, railLen: railLen, targetAlt: targetAlt,
       vCirc: vCirc, gPeak: gPeak, downrange: downrange, dur: dur, chuteAt: chuteAt,
-      gap: gap, railH: railH, cap: cap, res: resistance,
+      gap: gap, railH: railH, cap: cap, res: resistance, orbital: orbital,
       spaceZoom: Math.max(1.6, Math.min(6, spaceZoom))
     };
+
+    /* Where a terrestrial shot was sent, and how far out it lands. */
+    var want = aimedCity ? groundDistance(pad, aimedCity) : readPositive($('range')) * 1000;
+    if (!isFinite(want) || want <= 0) want = 1000;
+    var miss = downrange - want;
+    solution.want = want;
+    solution.miss = miss;
+    if (!orbital) {
+      $('groundHint').innerHTML = aimedCity
+        ? 'Sent at <b>' + aimedCity.name + '</b>, ' + kmStr(want) + ' away. Pick another city on ' +
+          'the map to change it, or turn the dial to shoot at bare ground.'
+        : 'No city picked, so the dial is the whole target. Tap a city marker and press ' +
+          '<b>Aim here</b> to send it somewhere real.';
+    }
 
     buildPathMesh(pts);
     setTrack(pts);
@@ -2659,26 +2771,57 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var ending = flightSol.impact !== null ? 'Back down at'
                : flightSol.escaped ? 'Leaves Earth by' : 'Coast ends at';
     var last = flightSol.samples[flightSol.samples.length - 1];
-    var rows = [
-      ['Muzzle velocity', sig(shot.v / 1000, 4) + ' km/s'],
-      ['Apogee', flightSol.escaped ? 'escapes Earth' : kmStr(flightSol.apogee)],
-      ['Speed at target', flightSol.reached ? sig(flightSol.reached.speed / 1000, 4) + ' km/s' : '—'],
-      ['Peak acceleration in the rails', sig(gPeak, 4) + ' g'],
-      ['Peak dynamic pressure, going up', sig(flightSol.maxQ / 1e6, 3) + ' MPa'],
-      ['Peak deceleration, going up', sig(flightSol.maxG, 4) + ' g'],
-      [ending, secs(flightSol.duration)],
-      ['Downrange at that point', kmStr(downrange)]
-    ];
+    /* Speed over the ground, which turns with the planet. */
+    var td = Math.hypot(last.v[0] + OMEGA * last.p[1],
+                        last.v[1] - OMEGA * last.p[0], last.v[2]);
+    var rows = [['Muzzle velocity', sig(shot.v / 1000, 4) + ' km/s']];
+
+    if (orbital) {
+      rows.push(['Apogee', flightSol.escaped ? 'escapes Earth' : kmStr(flightSol.apogee)]);
+      rows.push(['Speed at target', flightSol.reached ? sig(flightSol.reached.speed / 1000, 4) + ' km/s' : '—']);
+    } else {
+      rows.push(['Target range', kmStr(want)]);
+      rows.push(['Reaches', kmStr(downrange)]);
+      rows.push([miss > 0 ? 'Overshoots by' : 'Falls short by', kmStr(Math.abs(miss))]);
+      rows.push(['Impact speed', sig(td, 4) + ' m/s']);
+      rows.push(['Highest point', kmStr(flightSol.apogee)]);
+    }
+    rows.push(['Peak acceleration in the rails', sig(gPeak, 4) + ' g']);
+    rows.push(['Peak dynamic pressure, going up', sig(flightSol.maxQ / 1e6, 3) + ' MPa']);
+    rows.push(['Peak deceleration, going up', sig(flightSol.maxG, 4) + ' g']);
+    rows.push([ending, secs(flightSol.duration)]);
+    if (orbital) rows.push(['Downrange at that point', kmStr(downrange)]);
     if (chuteAt !== null) {
-      /* Speed over the ground, which turns with the planet. */
-      var td = Math.hypot(last.v[0] + OMEGA * last.p[1],
-                          last.v[1] - OMEGA * last.p[0], last.v[2]);
       rows.push(['Canopy out at', secs(chuteAt)]);
       rows.push(['Touchdown speed', sig(td, 3) + ' m/s']);
     }
     renderStats(rows);
 
-    if (!flightSol.reached) {
+    if (!orbital) {
+      /* Anything inside a percent of the range, or two kilometres,
+         counts as a hit — beyond that the question is how far out. */
+      var slack = Math.max(2000, want * 0.01);
+      var whom = aimedCity ? aimedCity.name + ', ' + aimedCity.cc : 'the target';
+      if (flightSol.escaped || flightSol.impact === null) {
+        verdict('no', 'NO — IT NEVER COMES DOWN',
+          'The shot leaves the atmosphere and does not return inside the window this ' +
+          'page follows. A terrestrial delivery wants an arc, not an escape — take the ' +
+          'bank down or the elevation off.');
+      } else if (Math.abs(miss) <= slack) {
+        verdict('yes', 'ON TARGET',
+          'Comes down <b>' + kmStr(Math.abs(miss)) + '</b> ' + (miss > 0 ? 'beyond' : 'short of') +
+          ' ' + whom + ' after ' + secs(flightSol.duration) + ', at <b>' + sig(td, 3) +
+          ' m/s</b>. The high point on the way was ' + kmStr(flightSol.apogee) + ', which is ' +
+          'incidental — the only question here is where it lands.');
+      } else {
+        verdict('no', miss > 0 ? 'OVER — ' + kmStr(miss) + ' LONG' : 'SHORT BY ' + kmStr(-miss),
+          'The target is <b>' + kmStr(want) + '</b> away and the shot reaches <b>' +
+          kmStr(downrange) + '</b>. ' + (miss > 0
+            ? 'Take charge off the bank, or raise the elevation past 45° to trade range for height.'
+            : 'More charge, or bring the elevation towards 45°, which is where a ballistic arc ' +
+              'carries furthest.') + ' The trim button will find the bank voltage for you.');
+      }
+    } else if (!flightSol.reached) {
       verdict('no', 'NO — FALLS SHORT',
         'Apogee is <b>' + kmStr(flightSol.apogee) + '</b> against a target of <b>' +
         kmStr(targetAlt) + '</b>. It leaves the muzzle at ' + sig(shot.v / 1000, 4) +
@@ -3327,6 +3470,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (!city || !pad) return;
     aimedCity = { name: city.name, cc: city.cc, lng: city.lng, lat: city.lat };
     var brg = bearingTo(pad, city);
+    /* A terrestrial shot is aimed at a place, so the range dial follows
+       the place rather than the other way round. */
+    $('range').value = String(Math.max(1, Math.round(groundDistance(pad, city) / 1000)));
     aimChanged(brg);
     toast('Aimed at ' + city.name + ' — ' + Math.round(brg) + '°, ' +
           kmStr(groundDistance(pad, city)) + ' away', 3200);
@@ -3337,7 +3483,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
   /* Clicking a marker aims at it, unless a pad is being placed. */
   map.on('click', function (e) {
-    if (picking || flight.active || !scene.cities.length) return;
+    if (picking || justPicked || flight.active || !scene.cities.length) return;
     var best = null, bestD = 34;
     for (var i = 0; i < scene.cities.length; i++) {
       var c = scene.cities[i];
@@ -4031,6 +4177,37 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     map.triggerRepaint();
   });
   $('showchute').addEventListener('change', solve);
+  $('mission').addEventListener('change', function () {
+    aimedCity = null;                 /* a new question wants a fresh target */
+    solve();
+  });
+  $('range').addEventListener('input', function () { aimedCity = null; solve(); });
+
+  /* Terrestrial shots are about arriving, so hand over the tedious part:
+     bisect the bank voltage until the arc comes down on the target. The
+     range rises with the charge all the way to the point the round leaves
+     the atmosphere, which is monotonic enough for a bisection. */
+  $('trim').addEventListener('click', function () {
+    if (!pad) return;
+    var want = solution && solution.want ? solution.want : readPositive($('range')) * 1000;
+    var volt = $('volt');
+    var lo = 1, hi = 300, best = null, bestMiss = Infinity;
+    for (var i = 0; i < 22; i++) {
+      var v = (lo + hi) / 2;
+      volt.value = String(Math.round(v * 100) / 100);
+      solve();
+      if (!solution || solution.flight.escaped || solution.flight.impact === null) { hi = v; continue; }
+      var d = solution.downrange - want;
+      if (Math.abs(d) < bestMiss) { bestMiss = Math.abs(d); best = volt.value; }
+      if (d > 0) hi = v; else lo = v;
+    }
+    if (best !== null) { volt.value = best; solve(); }
+    refreshControls();
+    toast(bestMiss < Math.max(2000, want * 0.01)
+      ? 'Trimmed to ' + best + ' kV — ' + kmStr(bestMiss) + ' off the target'
+      : 'Closest this bank gets is ' + kmStr(bestMiss) + ' out. Try a longer rail, ' +
+        'a lighter round, or 45° of elevation.', 5000);
+  });
   $('basemap').addEventListener('change', function (e) {
     ['imagery', 'topo', 'dark'].forEach(function (id) {
       map.setLayoutProperty(id, 'visibility', id === e.target.value ? 'visible' : 'none');
@@ -4047,7 +4224,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       Array.prototype.forEach.call($('deck').children, function (p) {
         p.hidden = p.id !== b.dataset.pane;
       });
-      $('conscroll').scrollTop = $('conscroll').scrollHeight;
+      /* Bring the station's own contents up under the rail rather than
+         jumping to the very bottom of everything. */
+      var sc = $('conscroll'), dk = $('deck'), st = $('stations');
+      sc.scrollTop += dk.getBoundingClientRect().top - sc.getBoundingClientRect().top
+                      - st.offsetHeight;
       fadeFoot();
     });
   });
@@ -4055,6 +4236,32 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var s = $('conscroll');
     s.classList.toggle('ended', s.scrollTop + s.clientHeight >= s.scrollHeight - 2);
   }
+
+  /* When there is no room for the right-hand rail the two cards move into
+     the console as stations of their own, rather than disappearing. */
+  var wideCost = window.matchMedia('(min-width: 941px)');
+  var wideArc = window.matchMedia('(min-width: 1181px)');
+  function reflowCards() {
+    var cost = $('costcard'), arc = $('chartcard'), rail = $('rightrail');
+    var costHome = wideCost.matches ? rail : $('p-cost');
+    var arcHome = wideArc.matches ? rail : $('p-arc');
+    if (cost.parentNode !== costHome) costHome.appendChild(cost);
+    if (arc.parentNode !== arcHome) arcHome.appendChild(arc);
+    /* the chart is drawn to a fixed viewBox, so it just needs a redraw */
+    if (solution) drawChart();
+    /* a station whose card has gone back to the rail must not stay open */
+    Array.prototype.forEach.call($('stations').children, function (b) {
+      if (!b.classList.contains('narrow-only')) return;
+      if (getComputedStyle(b).display === 'none' && b.classList.contains('on')) {
+        $('stations').children[0].click();
+      }
+    });
+    fadeFoot();
+  }
+  (wideCost.addEventListener ? wideCost.addEventListener.bind(wideCost, 'change')
+                             : wideCost.addListener.bind(wideCost))(reflowCards);
+  (wideArc.addEventListener ? wideArc.addEventListener.bind(wideArc, 'change')
+                            : wideArc.addListener.bind(wideArc))(reflowCards);
   $('conscroll').addEventListener('scroll', fadeFoot);
   window.addEventListener('resize', fadeFoot);
   Array.prototype.forEach.call(document.querySelectorAll('.seg[data-bind]'), makeSeg);
@@ -4068,6 +4275,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   $('resUnit').value = '0.000001';   /* stay off the panel */
   recomputeBank();
   refreshControls();
+  reflowCards();
   fadeFoot();
 
   var panel = $('panel'), panelBtn = $('panel-btn');
@@ -4076,13 +4284,14 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     panelBtn.classList.remove('show');
   });
   map.on('click', function () {
-    if (window.innerWidth < 720 && !panel.classList.contains('collapsed') && !picking) {
+    if (window.innerWidth <= 780 && !panel.classList.contains('collapsed') && !picking) {
       panel.classList.add('collapsed');
       panelBtn.classList.add('show');
     }
   });
   window.addEventListener('resize', function () {
-    if (window.innerWidth >= 720) { panel.classList.remove('collapsed'); panelBtn.classList.remove('show'); }
+    if (window.innerWidth > 780) { panel.classList.remove('collapsed'); panelBtn.classList.remove('show'); }
+    reflowCards();
   });
 
   /* ════════════════════════════════════════════════════════════
@@ -4095,7 +4304,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     map.setVerticalFieldOfView(48);
     $('loader').classList.add('gone');
     setTimeout(function () { $('loader').style.display = 'none'; }, 800);
-    if (window.innerWidth < 720) { panel.classList.add('collapsed'); panelBtn.classList.add('show'); }
+    if (window.innerWidth <= 780) { panel.classList.add('collapsed'); panelBtn.classList.add('show'); }
     setCamera('chase');
     updateCities();
 
