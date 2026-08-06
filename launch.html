@@ -497,6 +497,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         <div class="knob" data-bind="railH" data-min="0.05" data-max="3" data-step="0.01"
              data-label="Rail height" data-unit="m" data-dp="2"></div>
       </div>
+      <p class="hint" id="railmix">&nbsp;</p>
       <p class="hint" id="gapHint">&nbsp;</p>
     </section>
 
@@ -532,6 +533,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       </div>
       <div class="seg-h">Nose</div>
       <div class="seg" data-bind="shape"></div>
+      <label class="tgl" data-bind="showchute" style="margin-top:6px"><i></i>Parachute recovery</label>
       <p class="hint" id="dPayHint">&nbsp;</p>
     </section>
 
@@ -551,6 +553,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         <label class="tgl" data-bind="showtrack"><i></i>Ground track</label>
         <label class="tgl" data-bind="showcities"><i></i>City markers</label>
         <label class="tgl" data-bind="showbuildings"><i></i>3D buildings at the target</label>
+        <label class="tgl" data-bind="showsite"><i></i>Launch site structures</label>
+        <label class="tgl" data-bind="showplasma"><i></i>Plasma trail</label>
       </div>
       <p class="hint" style="margin-top:8px">
         Terrain is drawn at true vertical scale, so the pad height the physics
@@ -606,6 +610,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   <input type="checkbox" id="showtrack" checked/>
   <input type="checkbox" id="showcities" checked/>
   <input type="checkbox" id="showbuildings" checked/>
+  <input type="checkbox" id="showchute" checked/>
+  <input type="checkbox" id="showsite" checked/>
+  <input type="checkbox" id="showplasma" checked/>
 </div>
 
 <!-- ── Right-hand rail: what it costs, then the altitude chart ── -->
@@ -697,6 +704,14 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   var GM = 3.986004418e14;
   var R_E = 6371000;
   var OMEGA = 7.2921159e-5;
+
+  /* Recovery. Drag area over mass for the canopy, chosen so that whatever
+     the round weighs it settles at about 18 m/s at sea level: at terminal
+     velocity q·(Cd·A/m) = g, so Cd·A/m = 2g / (ρ₀ v²). Against a dart's
+     7e-5 that is four thousand times the drag, which is the point. */
+  var CHUTE_CDAM = 2 * G0 / (1.225 * 18 * 18);
+  var CHUTE_FILL = 0.6;      /* seconds from first tug to fully open */
+  var CHUTE_AT = 0.98;       /* how far through the ballistic flight it goes */
 
   /* 1976 US Standard Atmosphere as piecewise exponentials: [base km, ρ, scale km] */
   var ATMO = [
@@ -869,7 +884,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     vel[0] += -OMEGA * pos[1];
     vel[1] += OMEGA * pos[0];
 
-    var t = 0, apogee = -Infinity, maxQ = 0, maxG = 0, reached = null;
+    var t = 0, apogee = -Infinity, maxQ = 0, maxG = 0, reached = null, steps = 0;
     var startAlt = Math.hypot(pos[0], pos[1], pos[2]) - R_E;
     var samples = [];
     var sampleEvery = 0.02, nextSample = 0;
@@ -907,7 +922,16 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       var w = Math.max(Math.hypot(wx, wy, wz), 1e-6);
       var rho = density(alt);
       var q = 0.5 * rho * w * w;
-      var aDrag = q * p.cdAm;
+
+      /* The canopy: nothing at all until its moment, then a smooth
+         inflation rather than a step, which the integrator would have to
+         chase down to nothing to resolve. */
+      var chute = 0;
+      if (p.chuteAt !== undefined && p.chuteAt !== null && t >= p.chuteAt) {
+        chute = Math.min(1, (t - p.chuteAt) / CHUTE_FILL);
+        chute = chute * chute * (3 - 2 * chute);
+      }
+      var aDrag = q * (p.cdAm + chute * CHUTE_CDAM);
       /* The launcher page answers a question about the way up, so the
          loads it quotes are the ones on the way up. Re-entry is drawn,
          but it is not what the verdict is about. */
@@ -923,7 +947,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       }
 
       var here = { t: t, p: [pos[0], pos[1], pos[2]], v: [vel[0], vel[1], vel[2]],
-                   alt: alt, q: q, g: aDrag / G0 };
+                   alt: alt, q: q, g: aDrag / G0, chute: chute };
 
       if (vr < 0 && alt - floor < TERMINAL) {
         tail.push(here);
@@ -967,7 +991,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       var dt = Math.min(alt > 150000 ? 2 : 0.2, 100 / Math.max(speed, 1));
       var atot = Math.hypot(ax, ay, az2);
       if (atot > 0) dt = Math.min(dt, 0.01 * speed / atot);
-      dt = Math.max(dt, 1e-4);
+      /* A canopy opening at hypersonic speed pulls hundreds of thousands
+         of g for a moment, and the floor has to come down to follow it. */
+      dt = Math.max(dt, chute > 0 ? 2e-6 : 1e-4);
+      if (++steps > 900000) break;
       vel[0] += ax * dt; vel[1] += ay * dt; vel[2] += az2 * dt;
       pos[0] += vel[0] * dt; pos[1] += vel[1] * dt; pos[2] += vel[2] * dt;
       t += dt;
@@ -993,7 +1020,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       t: mix(a.t, b.t),
       p: [mix(a.p[0], b.p[0]), mix(a.p[1], b.p[1]), mix(a.p[2], b.p[2])],
       v: [mix(a.v[0], b.v[0]), mix(a.v[1], b.v[1]), mix(a.v[2], b.v[2])],
-      alt: mix(a.alt, b.alt), q: mix(a.q, b.q), g: mix(a.g, b.g)
+      alt: mix(a.alt, b.alt), q: mix(a.q, b.q), g: mix(a.g, b.g),
+      chute: mix(a.chute || 0, b.chute || 0)
     };
   }
 
@@ -1582,6 +1610,75 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     '}'
   ].join('\n');
 
+  /* ─── Plasma ───────────────────────────────────────────────────────────
+     Point sprites, positions worked out on the processor so the sizes can
+     be exact in pixels and the whole thing stays a pure function of the
+     playback clock — scrub backwards and the plume is the same plume. */
+  var PLASMA_VERT = [
+    'attribute vec3 a_merc;', 'attribute vec3 a_globe;',
+    'attribute vec3 a_prop;',                 /* size in px, age, glow */
+    'uniform mat4 u_globe, u_mercator;',
+    'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
+    'varying float v_age;', 'varying float v_glow;',
+    'void main() {',
+    '  v_age = a_prop.y; v_glow = a_prop.z;',
+    '  vec4 onGlobe = u_globe * vec4(a_globe, 1.0);',
+    '  onGlobe.z = (1.0 - (dot(a_globe, u_globe_clip.xyz) + u_globe_clip.w)) * onGlobe.w;',
+    '  vec4 onPlane = u_mercator * vec4(a_merc, 1.0);',
+    '  gl_Position = mix(onPlane, onGlobe, u_transition);',
+    '  gl_PointSize = a_prop.x;',
+    '}'
+  ].join('\n');
+
+  var PLASMA_FRAG = [
+    'precision mediump float;',
+    'varying float v_age;', 'varying float v_glow;',
+    'void main() {',
+    '  vec2 d = gl_PointCoord - 0.5;',
+    '  float r = dot(d, d);',
+    '  if (r > 0.25) discard;',
+    /* A hard core in a soft halo, the way a luminous gas looks. */
+    '  float soft = exp(-r * 11.0);',
+    '  vec3 c = mix(vec3(1.0, 0.97, 0.90), vec3(1.0, 0.52, 0.13), smoothstep(0.0, 0.30, v_age));',
+    '  c = mix(c, vec3(0.32, 0.10, 0.06), smoothstep(0.30, 1.0, v_age));',
+    '  float a = soft * v_glow * (1.0 - v_age) * (1.0 - v_age);',
+    '  gl_FragColor = vec4(c * a, a);',
+    '}'
+  ].join('\n');
+
+  /* ─── The launch site ───────────────────────────────────────────────────
+     One merged mesh for the whole installation, rebuilt only when the thing
+     it describes changes. Shade is baked per vertex against a fixed local
+     sun, because a normal would need a different rotation in each of the
+     two projections and the site is small enough not to care. */
+  var SITE_VERT = [
+    'attribute vec3 a_merc;', 'attribute vec3 a_globe;', 'attribute vec2 a_look;',
+    'uniform mat4 u_globe, u_mercator;',
+    'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
+    'varying vec2 v_look;',
+    'void main() {',
+    '  v_look = a_look;',
+    '  vec4 onGlobe = u_globe * vec4(a_globe, 1.0);',
+    '  onGlobe.z = (1.0 - (dot(a_globe, u_globe_clip.xyz) + u_globe_clip.w)) * onGlobe.w;',
+    '  vec4 onPlane = u_mercator * vec4(a_merc, 1.0);',
+    '  gl_Position = mix(onPlane, onGlobe, u_transition);',
+    '}'
+  ].join('\n');
+
+  var SITE_FRAG = [
+    'precision mediump float;',
+    'varying vec2 v_look;',                   /* shade, kind */
+    'void main() {',
+    '  float k = v_look.y;',
+    '  vec3 c = vec3(0.72, 0.45, 0.22);',                       /* 0 rail copper */
+    '  if (k > 0.5 && k < 1.5) c = vec3(0.42, 0.44, 0.52);',    /* 1 steelwork */
+    '  if (k > 1.5 && k < 2.5) c = vec3(0.24, 0.26, 0.34);',    /* 2 capacitor can */
+    '  if (k > 2.5 && k < 3.5) c = vec3(0.68, 0.70, 0.76);',    /* 3 insulator */
+    '  if (k > 3.5) c = vec3(0.34, 0.22, 0.14);',               /* 4 cable */
+    '  gl_FragColor = vec4(c * v_look.x, 1.0);',
+    '}'
+  ].join('\n');
+
   function compile(gl, type, src) {
     var s = gl.createShader(type);
     gl.shaderSource(s, src); gl.compileShader(s);
@@ -1627,15 +1724,206 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       /* tail cap */
       v(0, 0, -.5, 0, 0, -1); v(r*c1, r*s1, -.5, 0, 0, -1); v(r*c0, r*s0, -.5, 0, 0, -1);
     }
+    /* A canopy: a hemisphere opening downward, with a skirt. */
+    var domeAt = pos.length / 3;
+    var rings = 6;
+    for (var ri = 0; ri < rings; ri++) {
+      var t0 = ri / rings, t1 = (ri + 1) / rings;
+      var e0 = t0 * Math.PI / 2, e1 = t1 * Math.PI / 2;
+      var r0 = Math.cos(e0) * 0.5, z0 = Math.sin(e0) * 0.42 - 0.12;
+      var r1 = Math.cos(e1) * 0.5, z1 = Math.sin(e1) * 0.42 - 0.12;
+      for (i = 0; i < seg; i++) {
+        a0 = i / seg * 2 * Math.PI; a1 = (i + 1) / seg * 2 * Math.PI;
+        c0 = Math.cos(a0); s0 = Math.sin(a0); c1 = Math.cos(a1); s1 = Math.sin(a1);
+        v(r0 * c0, r0 * s0, z0, c0 * 0.5, s0 * 0.5, 0.85);
+        v(r0 * c1, r0 * s1, z0, c1 * 0.5, s1 * 0.5, 0.85);
+        v(r1 * c1, r1 * s1, z1, c1 * 0.5, s1 * 0.5, 0.85);
+        v(r0 * c0, r0 * s0, z0, c0 * 0.5, s0 * 0.5, 0.85);
+        v(r1 * c1, r1 * s1, z1, c1 * 0.5, s1 * 0.5, 0.85);
+        v(r1 * c0, r1 * s0, z1, c0 * 0.5, s0 * 0.5, 0.85);
+      }
+    }
+    /* Four rigging lines down to the round. */
+    for (i = 0; i < 4; i++) {
+      var la = i / 4 * 2 * Math.PI, lc = Math.cos(la), ls = Math.sin(la);
+      var px = 0.012 * -ls, py = 0.012 * lc;
+      v(0.46 * lc - px, 0.46 * ls - py, -0.12, 0, 0, 1);
+      v(0.46 * lc + px, 0.46 * ls + py, -0.12, 0, 0, 1);
+      v(px, py, -1.0, 0, 0, 1);
+      v(0.46 * lc - px, 0.46 * ls - py, -0.12, 0, 0, 1);
+      v(px, py, -1.0, 0, 0, 1);
+      v(-px, -py, -1.0, 0, 0, 1);
+    }
+
     return {
       pos: new Float32Array(pos), nrm: new Float32Array(nrm),
       cylinder: { at: cylAt, count: cylCount },
-      dart: { at: dartAt, count: pos.length / 3 - dartAt }
+      dart: { at: dartAt, count: domeAt - dartAt },
+      dome: { at: domeAt, count: pos.length / 3 - domeAt }
+    };
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     THE LAUNCH SITE
+     A capacitor tower for every half farad, a rail laid a section
+     at a time, and the cables that join them, all in one mesh.
+     Built in metres about the pad — x along the shot, y to the
+     left, z up — and converted at the end.
+     ════════════════════════════════════════════════════════════ */
+  var TOWER_F = 0.5;       /* farads in one tower */
+  var TOWER_W = 2.2, TOWER_H = 6.4, TOWER_PITCH = 3.4;
+  var SEGMENT_M = 10;      /* a shipped length of rail */
+  var MAX_TOWERS = 260, MAX_SEGMENTS = 220;
+
+  function siteMesh(cfg) {
+    var merc = [], globe = [], look = [];
+    var LIGHT = [0.40, 0.42, 0.82];
+    var sinAz = Math.sin(cfg.azimuth * D2R), cosAz = Math.cos(cfg.azimuth * D2R);
+    var m = metresPerDegree(cfg.pad.lat);
+
+    /* local metres → the two projections */
+    function push(x, y, z, shade, kind) {
+      var lng = cfg.pad.lng + (x * sinAz - y * cosAz) / m.lng;
+      var lat = cfg.pad.lat + (x * cosAz + y * sinAz) / m.lat;
+      var alt = cfg.pad.alt + z;
+      var mp = mercPoint(lng, lat, alt), gp = globePoint(lng, lat, alt);
+      merc.push(mp[0], mp[1], mp[2]);
+      globe.push(gp[0], gp[1], gp[2]);
+      look.push(shade, kind);
+    }
+    function shadeOf(n) {
+      var d = n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2];
+      return 0.46 + 0.72 * Math.max(0, d);
+    }
+    /* An axis-aligned box in local metres, optionally tilted about y so a
+       rail section can lie along the ramp. */
+    var FACES = [
+      [[1,0,0], [[1,-1,-1],[1,1,-1],[1,1,1],[1,-1,-1],[1,1,1],[1,-1,1]]],
+      [[-1,0,0], [[-1,1,-1],[-1,-1,-1],[-1,-1,1],[-1,1,-1],[-1,-1,1],[-1,1,1]]],
+      [[0,1,0], [[1,1,-1],[-1,1,-1],[-1,1,1],[1,1,-1],[-1,1,1],[1,1,1]]],
+      [[0,-1,0], [[-1,-1,-1],[1,-1,-1],[1,-1,1],[-1,-1,-1],[1,-1,1],[-1,-1,1]]],
+      [[0,0,1], [[1,-1,1],[1,1,1],[-1,1,1],[1,-1,1],[-1,1,1],[-1,-1,1]]],
+      [[0,0,-1], [[-1,-1,-1],[-1,1,-1],[1,1,-1],[-1,-1,-1],[1,1,-1],[1,-1,-1]]]
+    ];
+    function box(cx, cy, cz, hx, hy, hz, tilt, kind) {
+      var c = Math.cos(tilt || 0), s = Math.sin(tilt || 0);
+      for (var f = 0; f < 6; f++) {
+        var n = FACES[f][0];
+        var nr = [n[0] * c - n[2] * s, n[1], n[0] * s + n[2] * c];
+        var sh = shadeOf(nr);
+        for (var i = 0; i < 6; i++) {
+          var p = FACES[f][1][i];
+          var lx = p[0] * hx, ly = p[1] * hy, lz = p[2] * hz;
+          push(cx + lx * c - lz * s, cy + ly, cz + lx * s + lz * c, sh, kind);
+        }
+      }
+    }
+
+    /* ── the rail, laid a section at a time ── */
+    var el = cfg.angle * D2R, ce = Math.cos(el), se = Math.sin(el);
+    var segLen = SEGMENT_M;
+    var nSeg = Math.ceil(cfg.railLen / segLen);
+    if (nSeg > MAX_SEGMENTS) { nSeg = MAX_SEGMENTS; segLen = cfg.railLen / nSeg; }
+    var halfGap = cfg.gap / 2, barW = Math.max(0.06, cfg.gap / 4), barH = cfg.railH / 2;
+    for (var s2 = 0; s2 < nSeg; s2++) {
+      var d0 = s2 * segLen, dm = d0 + segLen * 0.5;
+      var joint = segLen * 0.06;                      /* a visible break */
+      var half = (segLen - joint) / 2;
+      var cx = dm * ce, cz = dm * se;
+      box(cx, halfGap + barW, cz, half, barW, barH, el, 0);
+      box(cx, -halfGap - barW, cz, half, barW, barH, el, 0);
+      /* the bed the pair sits on, and a leg down to the ground */
+      box(cx, 0, cz - barH - 0.35, half, halfGap + barW * 2, 0.3, el, 1);
+      if (cz > 1.2) {
+        box(cx, 0, (cz - barH - 0.5) / 2, half * 0.16, halfGap * 0.8,
+            (cz - barH - 0.5) / 2, 0, 1);
+      }
+    }
+    /* the breech house at the near end */
+    box(-3.4, 0, 2.2, 3.4, halfGap + 2.4, 2.2, 0, 1);
+
+    /* ── the bank: one tower per half farad, ranked up alongside ── */
+    var nTower = Math.max(1, Math.min(MAX_TOWERS, Math.ceil(cfg.cap / TOWER_F)));
+    var perRow = Math.max(1, Math.round(Math.sqrt(nTower * 0.7)));
+    var rows = Math.ceil(nTower / perRow);
+    var yard = -10;                                   /* behind the breech */
+    var towerTops = [];
+    for (var ti = 0; ti < nTower; ti++) {
+      var col = ti % perRow, row = Math.floor(ti / perRow);
+      var tx = yard - row * TOWER_PITCH;
+      var ty = (col - (perRow - 1) / 2) * TOWER_PITCH;
+      box(tx, ty, TOWER_H / 2, TOWER_W / 2, TOWER_W / 2, TOWER_H / 2, 0, 2);
+      /* three insulator bands, so a tower reads as a tower */
+      for (var b2 = 0; b2 < 3; b2++) {
+        box(tx, ty, TOWER_H * (0.3 + b2 * 0.22),
+            TOWER_W * 0.58, TOWER_W * 0.58, 0.16, 0, 3);
+      }
+      if (row === 0) towerTops.push([tx, ty, TOWER_H + 0.4]);
+    }
+
+    /* ── cables: bezier from the front rank to the breech ──
+       Thicker for more copper: cross-section rises with the current the
+       shot pulls and falls as the loop resistance is driven down. */
+    var radius = Math.max(0.05, Math.min(1.1,
+      0.035 * Math.sqrt(Math.max(cfg.peakI, 1) / 1e5) * Math.pow(1e-4 / Math.max(cfg.res, 1e-9), 0.22)));
+    var SIDES = 6, STEPS = 20;
+    for (var ci = 0; ci < towerTops.length; ci++) {
+      var a = towerTops[ci];
+      var bx = -3.4, by = a[1] * 0.25, bz = 4.2;
+      /* two handles: out of the tower head, then down into the breech */
+      var h1 = [a[0] + 4, a[1], a[2] + 1.2];
+      var h2 = [bx - 5, by, bz - 3.5];
+      var prev = null;
+      for (var st = 0; st <= STEPS; st++) {
+        var u = st / STEPS, w = 1 - u;
+        var pt = [
+          w*w*w*a[0] + 3*w*w*u*h1[0] + 3*w*u*u*h2[0] + u*u*u*bx,
+          w*w*w*a[1] + 3*w*w*u*h1[1] + 3*w*u*u*h2[1] + u*u*u*by,
+          w*w*w*a[2] + 3*w*w*u*h1[2] + 3*w*u*u*h2[2] + u*u*u*bz
+        ];
+        if (prev) tube(prev, pt, radius, SIDES);
+        prev = pt;
+      }
+    }
+    /* A straight length of cable as a ring of quads. */
+    function tube(p0, p1, r, sides) {
+      var ax = p1[0] - p0[0], ay = p1[1] - p0[1], az = p1[2] - p0[2];
+      var len = Math.hypot(ax, ay, az) || 1;
+      ax /= len; ay /= len; az /= len;
+      var ux = Math.abs(az) > 0.9 ? 1 : 0, uy = 0, uz = Math.abs(az) > 0.9 ? 0 : 1;
+      var e1 = [ay * uz - az * uy, az * ux - ax * uz, ax * uy - ay * ux];
+      var e1l = Math.hypot(e1[0], e1[1], e1[2]) || 1;
+      e1 = [e1[0] / e1l, e1[1] / e1l, e1[2] / e1l];
+      var e2 = [ay * e1[2] - az * e1[1], az * e1[0] - ax * e1[2], ax * e1[1] - ay * e1[0]];
+      for (var k = 0; k < sides; k++) {
+        var t0 = k / sides * 2 * Math.PI, t1 = (k + 1) / sides * 2 * Math.PI;
+        var n0 = [e1[0] * Math.cos(t0) + e2[0] * Math.sin(t0),
+                  e1[1] * Math.cos(t0) + e2[1] * Math.sin(t0),
+                  e1[2] * Math.cos(t0) + e2[2] * Math.sin(t0)];
+        var n1 = [e1[0] * Math.cos(t1) + e2[0] * Math.sin(t1),
+                  e1[1] * Math.cos(t1) + e2[1] * Math.sin(t1),
+                  e1[2] * Math.cos(t1) + e2[2] * Math.sin(t1)];
+        var s0 = shadeOf(n0), s1 = shadeOf(n1);
+        var A = [p0[0] + n0[0]*r, p0[1] + n0[1]*r, p0[2] + n0[2]*r];
+        var B = [p0[0] + n1[0]*r, p0[1] + n1[1]*r, p0[2] + n1[2]*r];
+        var C = [p1[0] + n1[0]*r, p1[1] + n1[1]*r, p1[2] + n1[2]*r];
+        var D = [p1[0] + n0[0]*r, p1[1] + n0[1]*r, p1[2] + n0[2]*r];
+        push(A[0],A[1],A[2], s0, 4); push(B[0],B[1],B[2], s1, 4); push(C[0],C[1],C[2], s1, 4);
+        push(A[0],A[1],A[2], s0, 4); push(C[0],C[1],C[2], s1, 4); push(D[0],D[1],D[2], s0, 4);
+      }
+    }
+
+    return {
+      merc: new Float32Array(merc), globe: new Float32Array(globe),
+      look: new Float32Array(look), count: look.length / 2,
+      towers: nTower, segments: nSeg, segLen: segLen, cableR: radius
     };
   }
 
   var gfx = null;          /* GL objects, once the layer is added */
   var pathMesh = null;     /* {mercBuf, globeBuf, sBuf, count} for the current solution */
+  var siteGeo = null;      /* {mercBuf, globeBuf, lookBuf, count} for the installation */
+  var siteKey = '';        /* what it was built from, so it is not rebuilt for nothing */
   var CITY_OFF = new Float32Array([0.42, 0.72, 1.0]);   /* cold blue-white */
   var CITY_ON = new Float32Array([1.0, 0.78, 0.35]);    /* the one being aimed at */
 
@@ -1643,9 +1931,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     rail: null,            /* {lng, lat, alt, dir[3], length, bore} */
     projectile: null,      /* {lng, lat, alt, dir[3], size, glow} */
     cities: [],            /* markers near the middle of the view */
+    chute: null,           /* {lng, lat, alt, dir[3], size} once the canopy is out */
     progress: 0,
     headStop: 0,           /* how far behind the nose the trail stops, in s */
-    headTaper: 0           /* and how much of it is spent narrowing to a point */
+    headTaper: 0,          /* and how much of it is spent narrowing to a point */
+    plasma: 0              /* how many point sprites to draw this frame */
   };
 
   var rangeLayer = {
@@ -1655,6 +1945,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       var solidProg = link(gl, SOLID_VERT, SOLID_FRAG);
       var pathProg = link(gl, PATH_VERT, PATH_FRAG);
       var glowProg = link(gl, GLOW_VERT, GLOW_FRAG);
+      var plasmaProg = link(gl, PLASMA_VERT, PLASMA_FRAG);
+      var siteProg = link(gl, SITE_VERT, SITE_FRAG);
       var mesh = buildSolids(40);
       function buf(data) {
         var b = gl.createBuffer();
@@ -1663,10 +1955,32 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         return b;
       }
       gfx = {
+        plasma: {
+          prog: plasmaProg,
+          mercBuf: gl.createBuffer(), globeBuf: gl.createBuffer(), propBuf: gl.createBuffer(),
+          aMerc: gl.getAttribLocation(plasmaProg, 'a_merc'),
+          aGlobe: gl.getAttribLocation(plasmaProg, 'a_globe'),
+          aProp: gl.getAttribLocation(plasmaProg, 'a_prop'),
+          uGlobe: gl.getUniformLocation(plasmaProg, 'u_globe'),
+          uMerc: gl.getUniformLocation(plasmaProg, 'u_mercator'),
+          uClip: gl.getUniformLocation(plasmaProg, 'u_globe_clip'),
+          uTrans: gl.getUniformLocation(plasmaProg, 'u_transition')
+        },
+        site: {
+          prog: siteProg,
+          mercBuf: gl.createBuffer(), globeBuf: gl.createBuffer(), lookBuf: gl.createBuffer(),
+          aMerc: gl.getAttribLocation(siteProg, 'a_merc'),
+          aGlobe: gl.getAttribLocation(siteProg, 'a_globe'),
+          aLook: gl.getAttribLocation(siteProg, 'a_look'),
+          uGlobe: gl.getUniformLocation(siteProg, 'u_globe'),
+          uMerc: gl.getUniformLocation(siteProg, 'u_mercator'),
+          uClip: gl.getUniformLocation(siteProg, 'u_globe_clip'),
+          uTrans: gl.getUniformLocation(siteProg, 'u_transition')
+        },
         solid: {
           prog: solidProg,
           posBuf: buf(mesh.pos), nrmBuf: buf(mesh.nrm),
-          parts: { cylinder: mesh.cylinder, dart: mesh.dart },
+          parts: { cylinder: mesh.cylinder, dart: mesh.dart, dome: mesh.dome },
           aPos: gl.getAttribLocation(solidProg, 'a_pos'),
           aNrm: gl.getAttribLocation(solidProg, 'a_normal'),
           uGlobe: gl.getUniformLocation(solidProg, 'u_globe'),
@@ -1726,6 +2040,26 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       gl.depthFunc(gl.LEQUAL);
       gl.disable(gl.CULL_FACE);
 
+      /* ── the installation ── */
+      if (siteGeo && siteGeo.count) {
+        var W = gfx.site;
+        gl.useProgram(W.prog);
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+        gl.uniformMatrix4fv(W.uGlobe, false, new Float32Array(globeMat));
+        gl.uniformMatrix4fv(W.uMerc, false, new Float32Array(mercMat));
+        gl.uniform4f(W.uClip, plane[0], plane[1], plane[2], plane[3]);
+        gl.uniform1f(W.uTrans, t);
+        [[W.aMerc, siteGeo.mercBuf, 3], [W.aGlobe, siteGeo.globeBuf, 3],
+         [W.aLook, siteGeo.lookBuf, 2]].forEach(function (a) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, a[1]);
+          gl.enableVertexAttribArray(a[0]);
+          gl.vertexAttribPointer(a[0], a[2], gl.FLOAT, false, 0, 0);
+        });
+        gl.drawArrays(gl.TRIANGLES, 0, siteGeo.count);
+        [W.aMerc, W.aGlobe, W.aLook].forEach(function (a) { gl.disableVertexAttribArray(a); });
+      }
+
       /* ── the arc ── */
       if (pathMesh && pathMesh.count > 1) {
         var P = gfx.path;
@@ -1744,7 +2078,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         var eye = cameraEye();
         var eg = globePoint(eye.lng, eye.lat, eye.alt);
         gl.uniform3f(P.uCam, eg[0], eg[1], eg[2]);
-        gl.uniform1f(P.uWidth, 0.003);
+        /* In flight the plasma carries the drama, so the arc thins to a
+           thread that only says where the shot has been. */
+        gl.uniform1f(P.uWidth, flight.active ? 0.0009 : 0.003);
         function bindAttr(loc, buffer, size) {
           gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
           gl.enableVertexAttribArray(loc);
@@ -1844,10 +2180,154 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         drawSolid(S.parts.dart, scene.projectile, [s * 0.34, s * 0.34, s],
           new Float32Array([0.95, 0.86, 0.55]), scene.projectile.glow || 0);
       }
+      if (scene.chute) {
+        var cs = scene.chute.size;
+        drawSolid(S.parts.dome, scene.chute, [cs, cs, cs],
+          new Float32Array([0.90, 0.42, 0.20]), 0.12);
+      }
       gl.disableVertexAttribArray(S.aPos);
       gl.disableVertexAttribArray(S.aNrm);
+
+      /* ── plasma, last, so it lays over everything it should ── */
+      if (scene.plasma > 0) {
+        var L = gfx.plasma;
+        gl.useProgram(L.prog);
+        gl.depthMask(false);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.uniformMatrix4fv(L.uGlobe, false, new Float32Array(globeMat));
+        gl.uniformMatrix4fv(L.uMerc, false, new Float32Array(mercMat));
+        gl.uniform4f(L.uClip, plane[0], plane[1], plane[2], plane[3]);
+        gl.uniform1f(L.uTrans, t);
+        gl.bindBuffer(gl.ARRAY_BUFFER, L.mercBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, plasma.merc, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(L.aMerc);
+        gl.vertexAttribPointer(L.aMerc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, L.globeBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, plasma.globe, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(L.aGlobe);
+        gl.vertexAttribPointer(L.aGlobe, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, L.propBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, plasma.prop, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(L.aProp);
+        gl.vertexAttribPointer(L.aProp, 3, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.POINTS, 0, scene.plasma);
+        [L.aMerc, L.aGlobe, L.aProp].forEach(function (a) { gl.disableVertexAttribArray(a); });
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+      }
     }
   };
+
+  /* Rebuild the installation only when what it is made of changes. */
+  function placeSite() {
+    var gl = gfx && gfx.gl;
+    if (!gl) return;
+    if (!pad || !solution || !$('showsite').checked) {
+      siteGeo = null; siteKey = '';
+      return;
+    }
+    var cfg = {
+      pad: pad, azimuth: solution.azimuth, angle: solution.angle,
+      railLen: solution.railLen, gap: solution.gap, railH: solution.railH,
+      cap: solution.cap, res: solution.res, peakI: solution.shot.peakI
+    };
+    var key = [pad.lng.toFixed(5), pad.lat.toFixed(5), cfg.azimuth, cfg.angle,
+               cfg.railLen, cfg.gap, cfg.railH, cfg.cap, cfg.res,
+               Math.round(cfg.peakI / 1000)].join('|');
+    if (key === siteKey && siteGeo) return;
+    siteKey = key;
+
+    var geo = siteMesh(cfg);
+    if (!siteGeo) {
+      siteGeo = { mercBuf: gfx.site.mercBuf, globeBuf: gfx.site.globeBuf,
+                  lookBuf: gfx.site.lookBuf, count: 0 };
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, siteGeo.mercBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, geo.merc, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, siteGeo.globeBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, geo.globe, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, siteGeo.lookBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, geo.look, gl.STATIC_DRAW);
+    siteGeo.count = geo.count;
+    siteGeo.info = geo;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     PLASMA
+     Air does not get out of the way at eight kilometres a second;
+     it gets compressed, and what comes off the nose is a glowing
+     gas that falls behind and cools. Each particle is a fixed lag
+     behind the round rather than a thing with a memory, so the
+     plume is the same plume whichever way the clock is running.
+     ════════════════════════════════════════════════════════════ */
+  var PLASMA_N = 780;
+  var plasma = {
+    merc: new Float32Array(PLASMA_N * 3),
+    globe: new Float32Array(PLASMA_N * 3),
+    prop: new Float32Array(PLASMA_N * 3),
+    lag: new Float32Array(PLASMA_N),      /* 0 at the nose, 1 at the tail */
+    dir: new Float32Array(PLASMA_N * 3),  /* which way it wanders off */
+    fuzz: new Float32Array(PLASMA_N)
+  };
+  (function seedPlasma() {
+    /* A fixed, unshuffled spread: the trail should be evenly filled, and
+       any two runs of the same shot should look identical. */
+    var s = 12345;
+    function rnd() { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }
+    for (var i = 0; i < PLASMA_N; i++) {
+      plasma.lag[i] = Math.pow((i + 0.5) / PLASMA_N, 1.35);   /* denser at the nose */
+      var th = rnd() * Math.PI * 2, z = rnd() * 2 - 1, r = Math.sqrt(1 - z * z);
+      plasma.dir[i * 3] = r * Math.cos(th);
+      plasma.dir[i * 3 + 1] = r * Math.sin(th);
+      plasma.dir[i * 3 + 2] = z;
+      plasma.fuzz[i] = 0.55 + rnd() * 0.9;
+    }
+  })();
+
+  function updatePlasma(st) {
+    scene.plasma = 0;
+    if (!solution || !$('showplasma').checked) return;
+    var eye = cameraEye();
+    var c2c = (map.getCanvas().clientHeight / 2) / Math.tan(map.transform.fov * D2R / 2);
+    /* How long the glow survives, and how wide the plume spreads: both
+       ride on speed, because both are about how hard the air is hit. */
+    var life = Math.max(0.5, Math.min(4, 0.5 + st.speed / 2600));
+    var born, i, a, o, k, dist, px;
+    for (i = 0; i < PLASMA_N; i++) {
+      var age = plasma.lag[i];
+      born = st.t - age * life;
+      if (born < 0) continue;
+      a = stateAt(born);
+      /* No air, no plasma: the plume dies above the atmosphere and comes
+         back on the way down. */
+      var heat = Math.min(1, a.q / 1.2e5);
+      if (heat <= 0.01) continue;
+
+      var spread = plasma.fuzz[i] * age * (6 + a.speed * 0.035);
+      var m2 = metresPerDegree(a.lat);
+      o = i * 3;
+      var lng = a.lng + plasma.dir[o] * spread / m2.lng;
+      var lat = a.lat + plasma.dir[o + 1] * spread / m2.lat;
+      var alt = a.alt + plasma.dir[o + 2] * spread * 0.5;
+
+      dist = Math.max(30, Math.hypot((eye.lng - lng) * m2.lng,
+                                     (eye.lat - lat) * m2.lat, eye.alt - alt));
+      /* A puff starts tight on the nose and billows as it is left behind. */
+      var worldR = (2.2 + age * 26) * plasma.fuzz[i] * (1 + a.speed * 0.0012);
+      px = worldR * c2c / dist;
+      if (px < 0.9) continue;
+
+      k = scene.plasma;
+      var mp = mercPoint(lng, lat, alt), gp = globePoint(lng, lat, alt);
+      plasma.merc[k * 3] = mp[0]; plasma.merc[k * 3 + 1] = mp[1]; plasma.merc[k * 3 + 2] = mp[2];
+      plasma.globe[k * 3] = gp[0]; plasma.globe[k * 3 + 1] = gp[1]; plasma.globe[k * 3 + 2] = gp[2];
+      plasma.prop[k * 3] = Math.min(52, px);
+      plasma.prop[k * 3 + 1] = age;
+      plasma.prop[k * 3 + 2] = heat;
+      scene.plasma++;
+    }
+  }
 
   /* Build the arc: a centreline plus the directions to swell it along.
      The shader decides how far, from how near the camera is. */
@@ -1970,12 +2450,26 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return (h === null || h === undefined || !isFinite(h)) ? null : h;
   }
 
+  var padSettle = null;
   function setPad(lngLat) {
-    var raw = map.queryTerrainElevation ? map.queryTerrainElevation(lngLat) : 0;
-    var alt = (raw === null || raw === undefined || !isFinite(raw)) ? 0 : raw;
-    pad = { lng: lngLat.lng, lat: lngLat.lat, alt: alt };
+    var raw = groundUnder(lngLat);
+    pad = { lng: lngLat.lng, lat: lngLat.lat, alt: raw === null ? 0 : raw };
     $('padline').innerHTML = fmtLat(pad.lat) + ' &nbsp; ' + fmtLon(pad.lng) + ' &nbsp; ' + kmStr(pad.alt) + ' ASL';
     solve();
+    /* Clicking terrain that has not finished loading gives no height at
+       all, and a pad at sea level buries the whole site in the hillside.
+       Keep asking for a few seconds, then settle for what there is. */
+    clearInterval(padSettle);
+    if (raw === null) {
+      var tries = 0;
+      padSettle = setInterval(function () {
+        var h = groundUnder(lngLat);
+        if (h !== null || ++tries > 30) {
+          clearInterval(padSettle);
+          if (h !== null && pad && pad.lng === lngLat.lng && pad.lat === lngLat.lat) setPad(lngLat);
+        }
+      }, 300);
+    }
   }
 
   map.on('click', function (e) {
@@ -2032,7 +2526,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     setTrack(null);
     scene.rail = null;
     scene.projectile = null;
+    scene.chute = null;
+    scene.plasma = 0;
     pathMesh = null;
+    siteGeo = null; siteKey = '';
     map.triggerRepaint();
 
     if (!pad) {
@@ -2062,6 +2559,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var vRot = OMEGA * R_E * Math.cos(pad.lat * D2R);
 
     $('gapHint').textContent = 'Inductance gradient ' + sig(lp * 1e6, 3) + ' µH/m.';
+    $('railmix').innerHTML = Math.ceil(railLen / SEGMENT_M) + ' sections of <b>' +
+      SEGMENT_M + ' m</b> laid end to end.';
     $('dPayHint').textContent = sig(area, 3) + ' m² frontal area — drag coefficient ' + shape.cd + '.';
     $('bankHint').textContent = 'Bank holds ' + eng(bankE, 'J') + '. ' + capT.note;
     $('padhint').textContent = 'Muzzle sits at ' + kmStr(muzzleAlt) + '. The ground here runs ' +
@@ -2100,12 +2599,21 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       return;
     }
 
-    /* Stage 2 */
-    var flightSol = flyPath({
+    /* Stage 2. The ballistic arc first, because the canopy is timed off it:
+       there is no telling when 98% of the flight has gone by until the
+       flight has been flown once without it. */
+    var arc = {
       lng: pad.lng, lat: pad.lat, siteAlt: pad.alt,
       angle: angle, azimuth: azimuth, railLen: railLen,
       v0: shot.v, cdAm: cdAm, targetAlt: targetAlt, ground: groundUnder
-    });
+    };
+    var flightSol = flyPath(arc);
+    var chuteAt = null;
+    if ($('showchute').checked && flightSol.impact !== null && flightSol.duration > 2) {
+      arc.chuteAt = CHUTE_AT * flightSol.duration;
+      var recovered = flyPath(arc);
+      if (recovered.impact !== null) { flightSol = recovered; chuteAt = arc.chuteAt; }
+    }
 
     /* Positions over the ground, for drawing. */
     var pts = [];
@@ -2136,19 +2644,22 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     solution = {
       shot: shot, flight: flightSol, points: pts, mass: mass, mPay: mPay,
       angle: angle, azimuth: azimuth, railLen: railLen, targetAlt: targetAlt,
-      vCirc: vCirc, gPeak: gPeak, downrange: downrange, dur: dur,
+      vCirc: vCirc, gPeak: gPeak, downrange: downrange, dur: dur, chuteAt: chuteAt,
+      gap: gap, railH: railH, cap: cap, res: resistance,
       spaceZoom: Math.max(1.6, Math.min(6, spaceZoom))
     };
 
     buildPathMesh(pts);
     setTrack(pts);
     placeRail();
+    placeSite();
     scene.progress = 1;
     scene.headStop = scene.headTaper = 0;
 
     var ending = flightSol.impact !== null ? 'Back down at'
                : flightSol.escaped ? 'Leaves Earth by' : 'Coast ends at';
-    renderStats([
+    var last = flightSol.samples[flightSol.samples.length - 1];
+    var rows = [
       ['Muzzle velocity', sig(shot.v / 1000, 4) + ' km/s'],
       ['Apogee', flightSol.escaped ? 'escapes Earth' : kmStr(flightSol.apogee)],
       ['Speed at target', flightSol.reached ? sig(flightSol.reached.speed / 1000, 4) + ' km/s' : '—'],
@@ -2157,7 +2668,15 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       ['Peak deceleration, going up', sig(flightSol.maxG, 4) + ' g'],
       [ending, secs(flightSol.duration)],
       ['Downrange at that point', kmStr(downrange)]
-    ]);
+    ];
+    if (chuteAt !== null) {
+      /* Speed over the ground, which turns with the planet. */
+      var td = Math.hypot(last.v[0] + OMEGA * last.p[1],
+                          last.v[1] - OMEGA * last.p[0], last.v[2]);
+      rows.push(['Canopy out at', secs(chuteAt)]);
+      rows.push(['Touchdown speed', sig(td, 3) + ' m/s']);
+    }
+    renderStats(rows);
 
     if (!flightSol.reached) {
       verdict('no', 'NO — FALLS SHORT',
@@ -2204,7 +2723,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   }
 
   function placeRail() {
-    if (!pad || !solution) { scene.rail = null; return; }
+    /* With the site built in true dimensions there is nothing for the
+       old fat marker rail to do except get in its way. */
+    if (!pad || !solution || $('showsite').checked) { scene.rail = null; return; }
     var th = solution.angle * D2R, az = solution.azimuth * D2R;
     /* the render frame is east / south / up */
     var dir = [Math.cos(th) * Math.sin(az), -Math.cos(th) * Math.cos(az), Math.sin(th)];
@@ -2357,7 +2878,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       dir: [east / mag, north / mag, up / mag],   /* east, north, up */
       vertical: up,
       q: a.s.q + (a.next.q - a.s.q) * a.f,
-      g: a.s.g + (a.next.g - a.s.g) * a.f
+      g: a.s.g + (a.next.g - a.s.g) * a.f,
+      chute: (a.s.chute || 0) + ((a.next.chute || 0) - (a.s.chute || 0)) * a.f
     };
   }
 
@@ -2427,6 +2949,17 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var proj = { lng: st.lng, lat: st.lat, alt: st.alt };
     var d = st.dir;
     var height = Math.max(1, st.alt - pad.alt);
+    /* Under the canopy the round falls almost straight down, so "behind"
+       becomes "directly overhead" — which is exactly where the canopy is.
+       Flatten the chase and tail directions so they watch it come down
+       instead of staring into the inside of the parachute. */
+    if ((st.chute || 0) > 0.05) {
+      var flat = Math.hypot(d[0], d[1]);
+      if (flat < 0.5) {
+        var az2 = solution.azimuth * D2R;
+        d = [Math.sin(az2) * 0.94, Math.cos(az2) * 0.94, d[2] < 0 ? -0.34 : 0.34];
+      }
+    }
 
     if (flight.cam === 'pad') {
       /* A range tracking camera: anchored by the pad, easing back as the
@@ -2525,6 +3058,26 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       size: size,
       glow: Math.min(1, st.q / 3e5)
     } : null;
+
+    /* The canopy rides above the round, hanging from the sky rather than
+       pointing where the round points, and swells as it fills. */
+    var open = st.chute || 0;
+    if (open > 0.01) {
+      var span = Math.max(size, dist / 26) * (0.35 + 0.65 * open);
+      var lift = span * 1.0;
+      scene.chute = {
+        lng: st.lng, lat: st.lat, alt: st.alt + lift,
+        dir: [0, 0, 1], size: span
+      };
+    } else {
+      scene.chute = null;
+    }
+    if (open > 0.02 && !flight.chuteSeen) {
+      flight.chuteSeen = true;
+      toast('Canopy out — ' + sig(st.g, 3) + ' g on the risers', 4200);
+    }
+
+    updatePlasma(st);
     scene.progress = st.t / solution.dur;
 
     /* Where the trail has to stop, expressed the way the mesh is indexed:
@@ -2539,7 +3092,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
     $('h-t').textContent = secs(st.t);
     $('h-alt').textContent = kmStr(st.alt);
-    $('h-spd').textContent = sig(st.speed / 1000, 4) + ' km/s';
+    /* Speed over the ground, not through the inertial frame: on the way
+       down under a canopy the difference is 400 m/s of Earth's spin, and
+       the readout should agree with the fall rate beside it. */
+    $('h-spd').textContent = sig(st.airSpeed / 1000, 4) + ' km/s';
     $('h-rng').textContent = kmStr(groundDistance(pad, st));
     $('h-vv').textContent = sig(st.vertical / 1000, 3) + ' km/s';
     $('h-q').textContent = st.q > 1e5 ? sig(st.q / 1e6, 3) + ' MPa' : sig(st.q / 1000, 3) + ' kPa';
@@ -2578,6 +3134,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     flight.t = 0;
     flight.playing = true;
     flight.last = 0;
+    flight.chuteSeen = false;
     document.body.classList.add('flying');
     updateCities();                       /* markers stand down for the flight */
     map.setCenterClampedToGround(false);
@@ -2600,6 +3157,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     map.dragRotate.enable(); map.touchZoomRotate.enable(); map.keyboard.enable();
     map.doubleClickZoom.enable();
     scene.projectile = null;
+    scene.chute = null;
+    scene.plasma = 0;
     setTimeout(updateCities, 60);
     scene.progress = 1;
     scene.headStop = scene.headTaper = 0;   /* the resting arc keeps its full width */
@@ -3386,7 +3945,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     $('cap').value = String(Number(total.toPrecision(10)));
     $('bankmix').innerHTML = n + ' module' + (n === 1 ? '' : 's') + ' × <b>' +
       $('bankSize').options[$('bankSize').selectedIndex].textContent +
-      '</b> &nbsp;=&nbsp; <b>' + sig(total, 4) + ' F</b>';
+      '</b> &nbsp;=&nbsp; <b>' + sig(total, 4) + ' F</b>, standing as <b>' +
+      Math.max(1, Math.ceil(total / TOWER_F)) + '</b> towers on the pad.';
     solve();
   }
 
@@ -3460,6 +4020,17 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   $('showtrack').addEventListener('change', function () {
     setTrack(solution ? solution.points : null);
   });
+  $('showsite').addEventListener('change', function () {
+    siteKey = '';
+    placeSite();
+    placeRail();
+    map.triggerRepaint();
+  });
+  $('showplasma').addEventListener('change', function () {
+    if (!$('showplasma').checked) scene.plasma = 0;
+    map.triggerRepaint();
+  });
+  $('showchute').addEventListener('change', solve);
   $('basemap').addEventListener('change', function (e) {
     ['imagery', 'topo', 'dark'].forEach(function (id) {
       map.setLayoutProperty(id, 'visibility', id === e.target.value ? 'visible' : 'none');
@@ -3536,6 +4107,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       var h = map.queryTerrainElevation(here);
       if ((h !== null && h !== undefined && isFinite(h)) || ++tries > 40) {
         clearInterval(seed);
+        /* If the terrain was slow and a pad has been chosen in the
+           meantime, that choice wins — do not drop it back at the centre. */
+        if (pad) return;
         setPad(here);
         toast('Pad set where the map opened — click "set the pad" to move it.', 4500);
       }
