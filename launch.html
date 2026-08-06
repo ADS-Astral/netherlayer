@@ -624,6 +624,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     </section>
 
     <section class="pane" id="p-scene" hidden>
+      <div class="seg-h">Edge quality</div>
+      <div class="seg" data-bind="sharpness"></div>
+      <p class="hint" id="sharpHint">&nbsp;</p>
       <div class="seg-h">Basemap</div>
       <div class="seg" data-bind="basemap"></div>
       <div style="margin-top:8px">
@@ -699,6 +702,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   <input type="checkbox" id="showchute" checked/>
   <input type="checkbox" id="showsite" checked/>
   <input type="checkbox" id="showplasma" checked/>
+  <select id="sharpness">
+    <option value="soft">Fastest</option>
+    <option value="sharp" selected>Sharp</option>
+    <option value="sharpest">Sharpest</option>
+  </select>
 </div>
 
 <!-- ── Right-hand rail: what it costs, then the altitude chart ── -->
@@ -1448,6 +1456,54 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return;
   }
 
+  /* ─── Sharpness ────────────────────────────────────────────────────────
+     antialias:true above asks the browser for multisampling, but it is only
+     a request — plenty of drivers hand back a context with none, and with
+     terrain on the world is drawn through offscreen passes anyway. So do
+     not depend on it: render more pixels than the screen has and let the
+     browser resolve them down. That is honest supersampling and it smooths
+     every edge on the page, the structures most of all.
+
+     Only displays that need it get it. A phone already at three device
+     pixels per CSS pixel is sharp enough and does not want the fill rate;
+     a plain desktop screen at one is where the stair-steps live. */
+  var SHARPEN = { soft: 1, sharp: 1.5, sharpest: 2 };
+  function applySharpness() {
+    var dpr = window.devicePixelRatio || 1;
+    var mult = SHARPEN[$('sharpness').value] || 1.5;
+    var want = Math.min(3, Math.max(dpr, dpr * mult));
+    if (Math.abs(map.getPixelRatio() - want) > 0.01) map.setPixelRatio(want);
+    $('sharpHint').textContent = 'Drawing ' + sig(want, 3) + ' pixels per screen pixel' +
+      (dpr !== 1 ? ' on a ' + sig(dpr, 2) + '× display' : '') + '.';
+  }
+  $('sharpness').addEventListener('change', function () {
+    sharpWatch.slow = 0;
+    applySharpness();
+  });
+  window.addEventListener('resize', applySharpness);
+  applySharpness();
+
+  /* Extra pixels are not free, and a flight is the one time they can be
+     felt. Watch how long frames are actually taking and give the quality
+     back if the machine cannot hold it — a smooth flight beats a sharp
+     slideshow, and the setting is one tap away in Scene. */
+  var sharpWatch = { slow: 0 };
+  function watchFrameCost(dt) {
+    if (!dt || !flight.active) return;
+    sharpWatch.slow += dt > 0.09 ? dt : -dt;
+    if (sharpWatch.slow < 0) sharpWatch.slow = 0;
+    if (sharpWatch.slow < 1.6) return;
+    sharpWatch.slow = 0;
+    var cur = $('sharpness').value;
+    var next = cur === 'sharpest' ? 'sharp' : cur === 'sharp' ? 'soft' : null;
+    if (!next) return;
+    $('sharpness').value = next;
+    applySharpness();
+    if (window.__refreshControls) window.__refreshControls();
+    toast('Frames were running long — easing the edge quality back to keep the ' +
+          'flight moving. Scene has the setting if you want it returned.', 5200);
+  }
+
   window.netherlayerRange = map;
   window.netherlayerBuild = '2026-08-05';
   if (window.console) console.log('Netherlayer Launch Range — build 2026-08-05');
@@ -1812,7 +1868,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     }
     /* A canopy: a hemisphere opening downward, with a skirt. */
     var domeAt = pos.length / 3;
-    var rings = 6;
+    var rings = 9;
     for (var ri = 0; ri < rings; ri++) {
       var t0 = ri / rings, t1 = (ri + 1) / rings;
       var e0 = t0 * Math.PI / 2, e1 = t1 * Math.PI / 2;
@@ -1952,7 +2008,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
        shot pulls and falls as the loop resistance is driven down. */
     var radius = Math.max(0.05, Math.min(1.1,
       0.035 * Math.sqrt(Math.max(cfg.peakI, 1) / 1e5) * Math.pow(1e-4 / Math.max(cfg.res, 1e-9), 0.22)));
-    var SIDES = 6, STEPS = 20;
+    var SIDES = 9, STEPS = 26;
     for (var ci = 0; ci < towerTops.length; ci++) {
       var a = towerTops[ci];
       var bx = -3.4, by = a[1] * 0.25, bz = 4.2;
@@ -2375,7 +2431,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     scene.plasma = 0;
     if (!solution || !$('showplasma').checked) return;
     var eye = cameraEye();
-    var c2c = (map.getCanvas().clientHeight / 2) / Math.tan(map.transform.fov * D2R / 2);
+    /* gl_PointSize counts pixels in the drawing buffer, not CSS pixels, so
+       the sizes worked out here have to be scaled by whatever the map is
+       rendering at — otherwise the plume shrinks on every sharp display. */
+    var c2c = (map.getCanvas().clientHeight / 2) / Math.tan(map.transform.fov * D2R / 2)
+              * map.getPixelRatio();
     /* How long the glow survives, and how wide the plume spreads: both
        ride on speed, because both are about how hard the air is hit. */
     var life = Math.max(0.5, Math.min(4, 0.5 + st.speed / 2600));
@@ -2402,13 +2462,13 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       /* A puff starts tight on the nose and billows as it is left behind. */
       var worldR = (2.2 + age * 26) * plasma.fuzz[i] * (1 + a.speed * 0.0012);
       px = worldR * c2c / dist;
-      if (px < 0.9) continue;
+      if (px < 0.9 * map.getPixelRatio()) continue;
 
       k = scene.plasma;
       var mp = mercPoint(lng, lat, alt), gp = globePoint(lng, lat, alt);
       plasma.merc[k * 3] = mp[0]; plasma.merc[k * 3 + 1] = mp[1]; plasma.merc[k * 3 + 2] = mp[2];
       plasma.globe[k * 3] = gp[0]; plasma.globe[k * 3 + 1] = gp[1]; plasma.globe[k * 3 + 2] = gp[2];
-      plasma.prop[k * 3] = Math.min(52, px);
+      plasma.prop[k * 3] = Math.min(64, px);
       plasma.prop[k * 3 + 1] = age;
       plasma.prop[k * 3 + 2] = heat;
       scene.plasma++;
@@ -2421,7 +2481,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (!gfx || points.length < 2) { pathMesh = null; return; }
     var gl = gfx.gl;
     var merc = [], globe = [], offMerc = [], offGlobe = [], svals = [];
-    var RING = 5;
+    /* A pentagonal tube reads as a faceted ribbon close up; nine sides
+       reads as a round one, and the arc is a single mesh either way. */
+    var RING = 9;
     var prev = null;
 
     for (var i = 0; i < points.length; i++) {
@@ -3266,6 +3328,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var st = stateAt(flight.t);
     cameraFor(st, dt);
     updateFlightVisuals(st);
+    watchFrameCost(dt);
     flight.raf = requestAnimationFrame(frame);
   }
 
@@ -3278,6 +3341,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     flight.playing = true;
     flight.last = 0;
     flight.chuteSeen = false;
+    sharpWatch.slow = 0;
     document.body.classList.add('flying');
     updateCities();                       /* markers stand down for the flight */
     map.setCenterClampedToGround(false);
