@@ -4061,8 +4061,16 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       turning = true; turned = 0; from = knobValue(k); lastAng = angleOf(e);
       k.dial.setPointerCapture(e.pointerId);
       k.dial.classList.add('hot');
+      holdSheet();
       e.preventDefault();
     });
+    /* touch-action tells a touch browser not to scroll from here, and most
+       listen. Safari on a phone will still hand the drag to the sheet
+       behind it a moment after it starts, so say it again on every move —
+       this is the one that actually settles it. */
+    k.dial.addEventListener('touchmove', function (e) {
+      if (turning && e.cancelable) e.preventDefault();
+    }, { passive: false });
     k.dial.addEventListener('pointermove', function (e) {
       if (!turning) return;
       var a = angleOf(e), d = a - lastAng;
@@ -4077,11 +4085,14 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       turning = false;
       k.dial.classList.remove('hot');
       try { k.dial.releasePointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+      releaseSheet();
       clearTimeout(k.timer);
       fireInput(k.input);
     }
     k.dial.addEventListener('pointerup', letGo);
     k.dial.addEventListener('pointercancel', letGo);
+    /* However the pointer goes away, the sheet gets its scrolling back. */
+    k.dial.addEventListener('lostpointercapture', letGo);
     k.dial.addEventListener('wheel', function (e) {
       e.preventDefault();
       setKnob(k, knobValue(k) + (e.deltaY < 0 ? 1 : -1) * k.step * (e.shiftKey ? 10 : 1), true);
@@ -4100,6 +4111,27 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
     knobs.push(k);
     drawKnob(k);
+  }
+
+  /* While a dial is being turned the sheet holds still, whatever tries to
+     move it — a touch browser deciding the gesture was a scroll after all,
+     or the readout above the deck changing height as the answer changes.
+     Turning a dial should move the dial and nothing else. */
+  var heldAt = null;
+  function keepSheet() {
+    var sc = $('conscroll');
+    if (heldAt !== null && sc && Math.abs(sc.scrollTop - heldAt) > 0.5) sc.scrollTop = heldAt;
+  }
+  function holdSheet() {
+    var sc = $('conscroll');
+    if (!sc) return;
+    heldAt = sc.scrollTop;
+    sc.addEventListener('scroll', keepSheet);
+  }
+  function releaseSheet() {
+    var sc = $('conscroll');
+    if (sc) sc.removeEventListener('scroll', keepSheet);
+    heldAt = null;
   }
 
   function makeSeg(el) {
