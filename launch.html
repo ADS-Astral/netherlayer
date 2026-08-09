@@ -320,6 +320,11 @@ input[type=range]::-moz-range-thumb { width: 15px; height: 15px; border: none; b
 @media (max-width: 1180px) and (min-width: 941px) {
   .stn.narrow-only[data-pane="p-arc"] { display: flex; }
 }
+/* Once those keys join the rail there are seven or eight of them in a rail
+   built for six, so go four to a row rather than orphaning the last one. */
+@media (max-width: 1180px) and (min-width: 781px) {
+  #stations { grid-template-columns: repeat(4, 1fr); }
+}
 #p-cost > *, #p-arc > * { margin: 0; }
 #p-cost #costcard, #p-arc #chartcard {
   background: none; border: 0; box-shadow: none; padding: 0; backdrop-filter: none;
@@ -530,17 +535,52 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   </div>
 
   <div id="stations">
+    <button type="button" class="stn" data-pane="p-target"><i>⌖</i><em>Target</em></button>
+    <button type="button" class="stn" data-pane="p-round"><i>➤</i><em>Round</em></button>
     <button type="button" class="stn on" data-pane="p-pad"><i>◎</i><em>Pad</em></button>
     <button type="button" class="stn" data-pane="p-rails"><i>▤</i><em>Rails</em></button>
     <button type="button" class="stn" data-pane="p-bank"><i>⚡</i><em>Bank</em></button>
-    <button type="button" class="stn" data-pane="p-round"><i>➤</i><em>Round</em></button>
-    <button type="button" class="stn" data-pane="p-target"><i>⌖</i><em>Target</em></button>
-    <button type="button" class="stn" data-pane="p-scene"><i>☰</i><em>Scene</em></button>
     <button type="button" class="stn narrow-only" data-pane="p-cost"><i>$</i><em>Cost</em></button>
     <button type="button" class="stn narrow-only" data-pane="p-arc"><i>◠</i><em>Arc</em></button>
+    <button type="button" class="stn" data-pane="p-scene"><i>☰</i><em>Scene</em></button>
   </div>
 
   <div id="deck">
+    <section class="pane" id="p-target" hidden>
+      <div class="seg" data-bind="mission"></div>
+      <div id="m-orbital">
+        <div class="knobs" style="margin-top:10px">
+          <div class="knob wide" data-bind="alt" data-min="10" data-max="2000" data-step="5"
+               data-label="Target altitude" data-unit="km"></div>
+        </div>
+        <div class="seg-h">Standard orbits</div>
+        <div class="seg stack" data-bind="dest"></div>
+      </div>
+      <div id="m-ground" hidden>
+        <div class="knobs" style="margin-top:10px">
+          <div class="knob wide" data-bind="range" data-min="1" data-max="12000" data-step="1"
+               data-label="Target range" data-unit="km"></div>
+        </div>
+        <button class="btn" id="trim">◈ Trim the bank to the target</button>
+        <p class="hint" id="groundHint">&nbsp;</p>
+      </div>
+    </section>
+
+    <section class="pane" id="p-round" hidden>
+      <div class="knobs">
+        <div class="knob" data-bind="mPay" data-min="1" data-max="10000" data-step="1"
+             data-label="Payload" data-unit="kg"></div>
+        <div class="knob" data-bind="mSabot" data-min="0" data-max="2000" data-step="1"
+             data-label="Sabot" data-unit="kg"></div>
+        <div class="knob" data-bind="dPay" data-min="0.05" data-max="2" data-step="0.01"
+             data-label="Diameter" data-unit="m" data-dp="2"></div>
+      </div>
+      <div class="seg-h">Nose</div>
+      <div class="seg" data-bind="shape"></div>
+      <label class="tgl" data-bind="showchute" style="margin-top:6px"><i></i>Parachute recovery</label>
+      <p class="hint" id="dPayHint">&nbsp;</p>
+    </section>
+
     <section class="pane" id="p-pad">
       <div class="pad-line" id="padline">No pad selected</div>
       <button class="btn" id="pick">◎ Set the pad on the terrain</button>
@@ -597,40 +637,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       <p class="hint" id="bankHint">&nbsp;</p>
     </section>
 
-    <section class="pane" id="p-round" hidden>
-      <div class="knobs">
-        <div class="knob" data-bind="mPay" data-min="1" data-max="10000" data-step="1"
-             data-label="Payload" data-unit="kg"></div>
-        <div class="knob" data-bind="mSabot" data-min="0" data-max="2000" data-step="1"
-             data-label="Sabot" data-unit="kg"></div>
-        <div class="knob" data-bind="dPay" data-min="0.05" data-max="2" data-step="0.01"
-             data-label="Diameter" data-unit="m" data-dp="2"></div>
-      </div>
-      <div class="seg-h">Nose</div>
-      <div class="seg" data-bind="shape"></div>
-      <label class="tgl" data-bind="showchute" style="margin-top:6px"><i></i>Parachute recovery</label>
-      <p class="hint" id="dPayHint">&nbsp;</p>
-    </section>
-
-    <section class="pane" id="p-target" hidden>
-      <div class="seg" data-bind="mission"></div>
-      <div id="m-orbital">
-        <div class="knobs" style="margin-top:10px">
-          <div class="knob wide" data-bind="alt" data-min="10" data-max="2000" data-step="5"
-               data-label="Target altitude" data-unit="km"></div>
-        </div>
-        <div class="seg-h">Standard orbits</div>
-        <div class="seg stack" data-bind="dest"></div>
-      </div>
-      <div id="m-ground" hidden>
-        <div class="knobs" style="margin-top:10px">
-          <div class="knob wide" data-bind="range" data-min="1" data-max="12000" data-step="1"
-               data-label="Target range" data-unit="km"></div>
-        </div>
-        <button class="btn" id="trim">◈ Trim the bank to the target</button>
-        <p class="hint" id="groundHint">&nbsp;</p>
-      </div>
-    </section>
+    <!-- On a narrow screen the right-hand cards move in here. -->
+    <section class="pane" id="p-cost" hidden></section>
+    <section class="pane" id="p-arc" hidden></section>
 
     <section class="pane" id="p-scene" hidden>
       <div class="seg-h">Edge quality</div>
@@ -647,13 +656,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       </div>
       <p class="hint" style="margin-top:8px">
         Terrain is drawn at true vertical scale, so the pad height the physics
-        uses is the height you see. <span class="build">Build 2026-08-05</span>
+        uses is the height you see. <span class="build">Build 2026-08-09</span>
       </p>
     </section>
-
-    <!-- On a narrow screen the right-hand cards move in here. -->
-    <section class="pane" id="p-cost" hidden></section>
-    <section class="pane" id="p-arc" hidden></section>
   </div>
   </div>
 
@@ -4387,7 +4392,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     Array.prototype.forEach.call($('stations').children, function (b) {
       if (!b.classList.contains('narrow-only')) return;
       if (getComputedStyle(b).display === 'none' && b.classList.contains('on')) {
-        $('stations').children[0].click();
+        $('stations').querySelector('[data-pane="p-pad"]').click();
       }
     });
     fadeFoot();
