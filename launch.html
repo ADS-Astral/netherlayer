@@ -181,6 +181,49 @@ body.flying #panel { max-height: calc(100% - 210px); }
   color: var(--muted); font-weight: 700; margin: 9px 0 5px;
 }
 
+/* ─── Finding a destination by name ───
+   The same cities the globe marks, nearest the pad first, because the
+   near ones are the ones a rail can actually reach. */
+.finder { display: flex; gap: 5px; }
+.finder input {
+  flex: 1 1 auto; min-width: 0; padding: 8px 10px; font: inherit; font-size: 12px;
+  background: #0a0a16; color: var(--text); border-radius: 8px;
+  border: 1px solid rgba(212,175,55,.2);
+}
+.finder input::placeholder { color: #5b5b86; }
+.finder input:focus { outline: none; border-color: var(--gold); }
+.finder #cityclear {
+  flex: none; width: 32px; cursor: pointer; font: inherit; font-size: 15px; line-height: 1;
+  background: #0a0a16; color: var(--muted); border-radius: 8px;
+  border: 1px solid rgba(212,175,55,.14);
+}
+.finder #cityclear:hover { color: var(--gold2); border-color: rgba(212,175,55,.45); }
+.citylist {
+  /* positioned, so a row's offsetTop is measured inside the list and
+     scrolling the chosen one into view lands where it should */
+  position: relative;
+  margin-top: 6px; max-height: 216px; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid rgba(212,175,55,.12); border-radius: 9px; background: #08080f;
+}
+.cityrow {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 7px 10px; cursor: pointer; text-align: left; font: inherit;
+  background: none; border: 0; border-bottom: 1px solid rgba(212,175,55,.07);
+  color: var(--text);
+}
+.cityrow:last-child { border-bottom: 0; }
+.cityrow b { font-size: 11.5px; font-weight: 600; }
+.cityrow .cc { font-size: 9px; letter-spacing: .1em; color: #6f6f9a; }
+.cityrow .far {
+  margin-left: auto; font-size: 10.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.cityrow:hover { background: rgba(212,175,55,.07); }
+.cityrow.on { background: rgba(212,175,55,.14); }
+.cityrow.on b, .cityrow.on .far { color: var(--gold); }
+.cityrow.reach .far { color: #6fd68a; }
+.citynone { padding: 9px 10px; font-size: 11px; color: var(--muted); }
+
 /* ─── Lamp switches ─── */
 .tgl {
   display: flex; align-items: center; gap: 9px; padding: 5px 0;
@@ -392,6 +435,13 @@ body:not(.flying) #flightbar { display: none; }
   .seg button { padding: 9px 10px; font-size: 12px; }
   .tgl { padding: 9px 0; font-size: 13px; }
   .btn { padding: 12px; font-size: 13.5px; }
+  /* 16px or Safari zooms the whole page in the moment the field is tapped. */
+  .finder input { font-size: 16px; padding: 10px; }
+  .finder #cityclear { width: 40px; }
+  .citylist { max-height: 246px; }
+  .cityrow { padding: 10px; }
+  .cityrow b { font-size: 13px; }
+  .cityrow .far { font-size: 11.5px; }
 
   /* The console is a sheet, so the button that summons it sits above it. */
   #panel-btn {
@@ -557,10 +607,15 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         <div class="seg stack" data-bind="dest"></div>
       </div>
       <div id="m-ground" hidden>
-        <div class="knobs" style="margin-top:10px">
-          <div class="knob wide" data-bind="range" data-min="1" data-max="12000" data-step="1"
-               data-label="Target range" data-unit="km"></div>
+        <div class="pad-line" id="targetline">No destination yet</div>
+        <div class="seg-h">Destination</div>
+        <div class="finder">
+          <input id="citysearch" type="text" inputmode="search" autocomplete="off"
+                 spellcheck="false" placeholder="Type a city, or tap one on the globe"
+                 aria-label="Find a destination city"/>
+          <button type="button" id="cityclear" title="Clear">×</button>
         </div>
+        <div id="citylist" class="citylist"></div>
         <button class="btn" id="trim">◈ Trim the bank to the target</button>
         <p class="hint" id="groundHint">&nbsp;</p>
       </div>
@@ -1454,11 +1509,15 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     ]
   };
 
+  /* Where the range is. The page opens looking at it, and the starting
+     pad goes here rather than wherever the camera happened to land. */
+  var HOME = { lng: 132.7394349, lat: -23.0788817 };
+
   var map;
   try {
     map = new maplibregl.Map({
       container: 'map', style: style,
-      center: [-117.85, 34.72], zoom: 13.2, pitch: 62, bearing: 70,
+      center: [HOME.lng, HOME.lat], zoom: 13.2, pitch: 62, bearing: 70,
       maxPitch: 180, maxZoom: 19, antialias: true,
       attributionControl: { compact: true }
     });
@@ -2642,6 +2701,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     pad = { lng: lngLat.lng, lat: lngLat.lat, alt: raw === null ? 0 : raw };
     $('padline').innerHTML = fmtLat(pad.lat) + ' &nbsp; ' + fmtLon(pad.lng) + ' &nbsp; ' + kmStr(pad.alt) + ' ASL';
     solve();
+    /* Every destination just changed range and bearing. */
+    showDestination();
     /* Clicking terrain that has not finished loading gives no height at
        all, and a pad at sea level buries the whole site in the hillside.
        Keep asking for a few seconds, then settle for what there is. */
@@ -2855,10 +2916,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     solution.miss = miss;
     if (!orbital) {
       $('groundHint').innerHTML = aimedCity
-        ? 'Sent at <b>' + aimedCity.name + '</b>, ' + kmStr(want) + ' away. Pick another city on ' +
-          'the map to change it, or turn the dial to shoot at bare ground.'
-        : 'No city picked, so the dial is the whole target. Tap a city marker and press ' +
-          '<b>Aim here</b> to send it somewhere real.';
+        ? 'Sent at <b>' + aimedCity.name + '</b>, ' + kmStr(want) + ' away, and the launcher ' +
+          'has turned to ' + Math.round(bearingTo(pad, aimedCity)) + '° to face it. ' +
+          'Pick another from the list or tap its marker on the globe to change where it goes.'
+        : 'Nowhere to send it yet. Tap a city marker on the globe, or find one by name above.';
+      refreshCityList();
     }
 
     buildPathMesh(pts);
@@ -3561,20 +3623,149 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         : over > 0 ? ' · ' + kmStr(over) + ' long' : ' · ' + kmStr(-over) + ' short';
     }
     $('aim-how').textContent = kmStr(range) + ' · ' + Math.round(brg) + '°' + reachNote;
-    $('aim-go').disabled = false;
+    /* Don't offer to aim at the place it is already pointed at. */
+    var already = aimedCity && aimedCity.name === focusedCity.name &&
+                  aimedCity.cc === focusedCity.cc;
+    $('aim-go').textContent = already ? 'Target' : 'Aim here';
+    $('aim-go').disabled = !!already;
   }
 
-  function aimAtCity(city) {
+  function aimAtCity(city, quiet) {
     if (!city || !pad) return;
     aimedCity = { name: city.name, cc: city.cc, lng: city.lng, lat: city.lat };
     var brg = bearingTo(pad, city);
-    /* A terrestrial shot is aimed at a place, so the range dial follows
-       the place rather than the other way round. */
+    /* A terrestrial shot is aimed at a place, so the range the solver
+       judges it against follows the place, not the other way round. */
     $('range').value = String(Math.max(1, Math.round(groundDistance(pad, city) / 1000)));
+    /* The question has been answered, so the search box goes back to
+       being empty and the whole list returns with this one marked. */
+    $('citysearch').value = '';
+    showDestination();
     aimChanged(brg);
-    toast('Aimed at ' + city.name + ' — ' + Math.round(brg) + '°, ' +
-          kmStr(groundDistance(pad, city)) + ' away', 3200);
+    if (!quiet) {
+      toast('Aimed at ' + city.name + ' — ' + Math.round(brg) + '°, ' +
+            kmStr(groundDistance(pad, city)) + ' away', 3200);
+    }
   }
+
+  /* ── Finding a destination by name ──────────────────────────────────
+     A terrestrial shot is sent to a place, so the destination is one of
+     the cities the globe marks: tap its marker, or find it here. The
+     list is ordered by how far it is from the pad, since the near ones
+     are the ones a rail can plausibly reach. */
+  var CITY_ROWS = 60;
+
+  function cityMatches(q) {
+    q = (q || '').trim().toLowerCase();
+    var out = [], i, c;
+    for (i = 0; i < CITIES.length; i++) {
+      c = CITIES[i];
+      if (q && c.name.toLowerCase().indexOf(q) < 0 && c.cc.toLowerCase() !== q) continue;
+      out.push(c);
+    }
+    if (pad) out.sort(function (a, b) { return groundDistance(pad, a) - groundDistance(pad, b); });
+    else out.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+    return out;
+  }
+
+  function renderCityList() {
+    var box = $('citylist');
+    /* Only worth building when the station is open on a terrestrial shot;
+       opening it calls back here. */
+    if (!box || $('m-ground').hidden || $('p-target').hidden) return;
+    var found = cityMatches($('citysearch').value);
+    if (!found.length) {
+      box.innerHTML = '<div class="citynone">No city by that name. The globe marks ' +
+        CITIES.length + ' of them — try fewer letters.</div>';
+      return;
+    }
+    /* Anything the current shot lands within a few per cent of is worth
+       marking: those are the ones this bank can already reach. */
+    var reach = solution && !solution.orbital ? solution.downrange : 0;
+    var frag = document.createDocumentFragment();
+    var shown = Math.min(found.length, CITY_ROWS);
+    for (var i = 0; i < shown; i++) {
+      var c = found[i];
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cityrow';
+      if (aimedCity && aimedCity.name === c.name && aimedCity.cc === c.cc) b.className += ' on';
+      var far = pad ? groundDistance(pad, c) : 0;
+      if (reach && Math.abs(far - reach) < Math.max(2000, reach * 0.03)) b.className += ' reach';
+      b.innerHTML = '<b></b><span class="cc"></span><span class="far"></span>';
+      b.firstChild.textContent = c.name;
+      b.childNodes[1].textContent = c.cc;
+      b.childNodes[2].textContent = pad
+        ? kmStr(far) + ' · ' + Math.round(bearingTo(pad, c)) + '°'
+        : '—';
+      (function (city) {
+        b.addEventListener('click', function () { aimAtCity(city); });
+      })(c);
+      frag.appendChild(b);
+    }
+    if (found.length > shown) {
+      var more = document.createElement('div');
+      more.className = 'citynone';
+      more.textContent = (found.length - shown) + ' more — keep typing to narrow it down.';
+      frag.appendChild(more);
+    }
+    box.innerHTML = '';
+    box.appendChild(frag);
+    var on = box.querySelector('.cityrow.on');
+    if (on && document.activeElement !== $('citysearch')) {
+      box.scrollTop = Math.max(0, on.offsetTop - box.clientHeight / 2);
+    }
+  }
+
+  /* Which cities this bank can already reach moves with every turn of a
+     dial, so redraw the list off the back of the solve — but only when
+     it is actually on screen, and not once per frame of a drag. */
+  var cityListTimer = null;
+  function refreshCityList() {
+    clearTimeout(cityListTimer);
+    cityListTimer = setTimeout(renderCityList, 220);
+  }
+
+  /* The chosen destination, said once at the top of the station. */
+  function showDestination() {
+    var line = $('targetline');
+    if (!line) return;
+    if (!aimedCity) {
+      line.textContent = pad ? 'No destination yet' : 'Set a pad first';
+    } else {
+      line.textContent = aimedCity.name + ', ' + aimedCity.cc + ' — ' +
+        kmStr(groundDistance(pad, aimedCity)) + ' out on ' +
+        Math.round(bearingTo(pad, aimedCity)) + '°';
+    }
+    renderCityList();
+  }
+
+  /* Switching to a terrestrial shot with nowhere to send it is a dead
+     end, so it starts aimed at the nearest city and you move it. */
+  function aimNearestCity() {
+    if (!pad) return false;
+    /* Not the city the pad is standing in — a shot at your own launch
+       site is nobody's idea of a destination. */
+    var near = cityMatches('').filter(function (c) {
+      return groundDistance(pad, c) > 50000;
+    })[0];
+    if (!near) return false;
+    aimAtCity(near, true);
+    return true;
+  }
+
+  $('citysearch').addEventListener('input', renderCityList);
+  $('citysearch').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var first = cityMatches($('citysearch').value)[0];
+    if (first) { $('citysearch').blur(); aimAtCity(first); }
+  });
+  $('cityclear').addEventListener('click', function () {
+    $('citysearch').value = '';
+    renderCityList();
+    $('citysearch').focus();
+  });
 
   $('aim-go').addEventListener('click', function () { aimAtCity(focusedCity); });
   $('showcities').addEventListener('change', updateCities);
@@ -4317,10 +4508,17 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   });
   $('showchute').addEventListener('change', solve);
   $('mission').addEventListener('change', function () {
-    aimedCity = null;                 /* a new question wants a fresh target */
-    solve();
+    if ($('mission').value === 'ground') {
+      /* A terrestrial shot needs somewhere to go, so give it the nearest
+         city and let the list move it. */
+      if (!aimedCity && aimNearestCity()) return;
+      solve();
+      showDestination();
+    } else {
+      aimedCity = null;               /* an orbit is not aimed at a place */
+      solve();
+    }
   });
-  $('range').addEventListener('input', function () { aimedCity = null; solve(); });
 
   /* Terrestrial shots are about arriving, so hand over the tedious part:
      bisect the bank voltage until the arc comes down on the target. The
@@ -4363,6 +4561,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       Array.prototype.forEach.call($('deck').children, function (p) {
         p.hidden = p.id !== b.dataset.pane;
       });
+      /* The destination list is only worth drawing when it is on show. */
+      if (b.dataset.pane === 'p-target') showDestination();
       /* Bring the station's own contents up under the rail rather than
          jumping to the very bottom of everything. */
       var sc = $('conscroll'), dk = $('deck'), st = $('stations');
@@ -4463,19 +4663,18 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     setCamera('chase');
     updateCities();
 
-    /* Wait for the terrain under the default view, then set a starting pad
-       so the page opens with something solved rather than empty. */
+    /* Wait for the terrain under the range, then stand the pad on it so
+       the page opens with something solved rather than empty. */
     var tries = 0;
     var seed = setInterval(function () {
-      var here = map.getCenter();
-      var h = map.queryTerrainElevation(here);
+      var h = map.queryTerrainElevation(HOME);
       if ((h !== null && h !== undefined && isFinite(h)) || ++tries > 40) {
         clearInterval(seed);
         /* If the terrain was slow and a pad has been chosen in the
-           meantime, that choice wins — do not drop it back at the centre. */
+           meantime, that choice wins — do not drop it back at the range. */
         if (pad) return;
-        setPad(here);
-        toast('Pad set where the map opened — click "set the pad" to move it.', 4500);
+        setPad(HOME);
+        toast('Pad standing at the range — click "set the pad" to move it.', 4500);
       }
     }, 400);
   });
