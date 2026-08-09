@@ -197,6 +197,14 @@ body.flying #panel { max-height: calc(100% - 210px); }
 .tgl.on i { border-color: var(--gold); background: rgba(212,175,55,.16); }
 .tgl.on i::after { left: 17px; background: var(--gold); box-shadow: 0 0 6px var(--gold); }
 
+/* While a dial is being turned this sits over the map but under the
+   console, so the map cannot claim the finger and the dial still gets it.
+   Deliberately not above everything: if a phone drops the pointer capture
+   mid-turn, a shield over the dial would swallow the rest of the gesture. */
+#shield { position: fixed; inset: 0; z-index: 19; display: none; touch-action: none; }
+body.turning #shield { display: block; }
+body.turning { -webkit-user-select: none; user-select: none; }
+
 .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
 .row label { font-size: 12.5px; color: var(--text); }
 .row .val { font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
@@ -503,6 +511,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 <body>
 
 <div id="map"></div>
+<div id="shield"></div>
 
 <!-- ── Launch console ── -->
 <div id="panel" class="nm">
@@ -1549,6 +1558,30 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   map.touchZoomRotate.enableRotation();
   map.dragRotate.enable();
   map.setCenterClampedToGround(false);
+
+  /* ─── Who may drive the map ────────────────────────────────────────────
+     Three things now want to say "not now": a flight in progress, the
+     console sheet standing over the map on a phone, and a dial being
+     turned. They used to disable and re-enable the handlers behind each
+     other's backs, so whoever finished first handed control back while
+     someone else still wanted it held. One registry, and the map moves
+     only when nobody is holding it. */
+  var mapHolds = {};
+  var MAP_HANDLERS = ['dragPan', 'scrollZoom', 'dragRotate', 'touchZoomRotate',
+                      'keyboard', 'doubleClickZoom'];
+  function holdMap(who, on) {
+    if (on) mapHolds[who] = true; else delete mapHolds[who];
+    var held = false, k;
+    for (k in mapHolds) if (mapHolds.hasOwnProperty(k)) { held = true; break; }
+    for (var i = 0; i < MAP_HANDLERS.length; i++) {
+      var h = map[MAP_HANDLERS[i]];
+      if (!h) continue;
+      if (held) h.disable(); else h.enable();
+    }
+    document.body.classList.toggle('mapheld', held);
+    return held;
+  }
+  function mapIsHeld(who) { return !!mapHolds[who]; }
 
   var toastTimer;
   function toast(msg, ms) {
@@ -3345,9 +3378,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     document.body.classList.add('flying');
     updateCities();                       /* markers stand down for the flight */
     map.setCenterClampedToGround(false);
-    map.dragPan.disable(); map.scrollZoom.disable();
-    map.dragRotate.disable(); map.touchZoomRotate.disable(); map.keyboard.disable();
-    map.doubleClickZoom.disable();
+    holdMap('flight', true);
 
     setCamera(solution.shot.v > 12000 ? 'chase' : 'pad');
     $('playpause').textContent = '❚❚ Pause';
@@ -3360,9 +3391,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (flight.raf) cancelAnimationFrame(flight.raf);
     flight.raf = null;
     document.body.classList.remove('flying');
-    map.dragPan.enable(); map.scrollZoom.enable();
-    map.dragRotate.enable(); map.touchZoomRotate.enable(); map.keyboard.enable();
-    map.doubleClickZoom.enable();
+    holdMap('flight', false);
     scene.projectile = null;
     scene.chute = null;
     scene.plasma = 0;
@@ -4124,14 +4153,23 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   }
   function holdSheet() {
     var sc = $('conscroll');
-    if (!sc) return;
+    if (!sc || heldAt !== null) return;
     heldAt = sc.scrollTop;
     sc.addEventListener('scroll', keepSheet);
+    /* A sheet over a live map is two things listening to one finger. For
+       as long as the dial has it, nothing else does: the map stops taking
+       gestures, and a shield over the whole page means no other element
+       ever sees the touch — pointer capture is supposed to guarantee that
+       and on a phone it does not always. */
+    holdMap('dial', true);
+    document.body.classList.add('turning');
   }
   function releaseSheet() {
     var sc = $('conscroll');
     if (sc) sc.removeEventListener('scroll', keepSheet);
     heldAt = null;
+    holdMap('dial', false);
+    document.body.classList.remove('turning');
   }
 
   function makeSeg(el) {
@@ -4375,20 +4413,36 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   fadeFoot();
 
   var panel = $('panel'), panelBtn = $('panel-btn');
-  panelBtn.addEventListener('click', function () {
-    panel.classList.remove('collapsed');
-    panelBtn.classList.remove('show');
-  });
+
+  /* On a phone the sheet stands over the map, and the two of them competing
+     for one finger is what made the dials jump. While the sheet is up the
+     map holds still; a tap on what is left of it puts the sheet away and
+     hands the map back. */
+  function sheetOpen() {
+    return window.innerWidth <= 780 && !panel.classList.contains('collapsed');
+  }
+  function syncSheetHold() { holdMap('sheet', sheetOpen()); }
+
+  function showSheet(on) {
+    panel.classList.toggle('collapsed', !on);
+    panelBtn.classList.toggle('show', !on && window.innerWidth <= 780);
+    syncSheetHold();
+  }
+  panelBtn.addEventListener('click', function () { showSheet(true); });
   map.on('click', function () {
-    if (window.innerWidth <= 780 && !panel.classList.contains('collapsed') && !picking) {
-      panel.classList.add('collapsed');
-      panelBtn.classList.add('show');
-    }
+    if (sheetOpen() && !picking) showSheet(false);
   });
   window.addEventListener('resize', function () {
     if (window.innerWidth > 780) { panel.classList.remove('collapsed'); panelBtn.classList.remove('show'); }
+    syncSheetHold();
     reflowCards();
   });
+  /* Setting a pad needs the terrain in view and the map live, so getting
+     the sheet out of the way is part of arming it. */
+  $('pick').addEventListener('click', function () {
+    if (picking && window.innerWidth <= 780) showSheet(false);
+  });
+  syncSheetHold();
 
   /* ════════════════════════════════════════════════════════════
      BOOT
@@ -4400,7 +4454,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     map.setVerticalFieldOfView(48);
     $('loader').classList.add('gone');
     setTimeout(function () { $('loader').style.display = 'none'; }, 800);
-    if (window.innerWidth <= 780) { panel.classList.add('collapsed'); panelBtn.classList.add('show'); }
+    if (window.innerWidth <= 780) showSheet(false);
     setCamera('chase');
     updateCities();
 
