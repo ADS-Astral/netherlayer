@@ -1891,10 +1891,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      sun, because a normal would need a different rotation in each of the
      two projections and the site is small enough not to care. */
   var SITE_VERT = [
-    'attribute vec3 a_merc;', 'attribute vec3 a_globe;', 'attribute vec2 a_look;',
+    'attribute vec3 a_merc;', 'attribute vec3 a_globe;', 'attribute vec4 a_look;',
     'uniform mat4 u_globe, u_mercator;',
     'uniform vec4 u_globe_clip;', 'uniform float u_transition;',
-    'varying vec2 v_look;',
+    'varying vec4 v_look;',
     'void main() {',
     '  v_look = a_look;',
     '  vec4 onGlobe = u_globe * vec4(a_globe, 1.0);',
@@ -1904,17 +1904,14 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     '}'
   ].join('\n');
 
+  /* Colour rides on the vertex now rather than being looked up from a
+     palette, because the hangar and the tanks bring their own — baked off
+     their textures when the models were prepared. */
   var SITE_FRAG = [
     'precision mediump float;',
-    'varying vec2 v_look;',                   /* shade, kind */
+    'varying vec4 v_look;',                   /* shade, r, g, b */
     'void main() {',
-    '  float k = v_look.y;',
-    '  vec3 c = vec3(0.72, 0.45, 0.22);',                       /* 0 rail copper */
-    '  if (k > 0.5 && k < 1.5) c = vec3(0.42, 0.44, 0.52);',    /* 1 steelwork */
-    '  if (k > 1.5 && k < 2.5) c = vec3(0.24, 0.26, 0.34);',    /* 2 capacitor can */
-    '  if (k > 2.5 && k < 3.5) c = vec3(0.68, 0.70, 0.76);',    /* 3 insulator */
-    '  if (k > 3.5) c = vec3(0.34, 0.22, 0.14);',               /* 4 cable */
-    '  gl_FragColor = vec4(c * v_look.x, 1.0);',
+    '  gl_FragColor = vec4(v_look.yzw * v_look.x, 1.0);',
     '}'
   ].join('\n');
 
@@ -2009,10 +2006,81 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      Built in metres about the pad — x along the shot, y to the
      left, z up — and converted at the end.
      ════════════════════════════════════════════════════════════ */
-  var TOWER_F = 0.5;       /* farads in one tower */
-  var TOWER_W = 2.2, TOWER_H = 6.4, TOWER_PITCH = 3.4;
+  var TOWER_F = 0.5;       /* farads in one tank */
+  var TOWER_W = 2.2, TOWER_H = 6.4, TOWER_PITCH = 3.4;   /* the stand-in can */
   var SEGMENT_M = 10;      /* a shipped length of rail */
   var MAX_TOWERS = 260, MAX_SEGMENTS = 220;
+  var FAR_TANKS = 80;      /* past this many, the cheap tank is enough */
+
+  /* The colours the hand-built parts are drawn in. The models carry their
+     own, baked off their textures when they were prepared. */
+  var KIND = [
+    [0.72, 0.45, 0.22],    /* 0 rail copper */
+    [0.42, 0.44, 0.52],    /* 1 steelwork */
+    [0.24, 0.26, 0.34],    /* 2 capacitor can */
+    [0.68, 0.70, 0.76],    /* 3 insulator */
+    [0.34, 0.22, 0.14]     /* 4 cable */
+  ];
+
+  /* ── The models ────────────────────────────────────────────────────
+     Prepared from the source glTF: the scene graph flattened, the two
+     door armatures posed at the end of their opening animation, the base
+     colour textures sampled onto every vertex, and the whole thing
+     simplified to something a map can carry. Positions are already in
+     site metres — x along the shot, y left, z up — with the hangar's gate
+     plane on the pad origin and each model standing on z = 0.
+
+     They are fetched once, on demand. Until they arrive, and for good if
+     they never do, the site falls back to the boxes it always drew. */
+  var MODELS = {
+    hangar: { url: 'site-hangar.bin' },
+    tank: { url: 'site-captank.bin' },
+    tankFar: { url: 'site-captank-far.bin' }
+  };
+  var modelsWanted = false;
+
+  function readModel(buf) {
+    var head = new Uint32Array(buf, 0, 1)[0];
+    var json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, head))
+                          .replace(/\0+$/, ''));
+    var o = 4 + head, n = json.verts, t = json.tris;
+    var pos = new Float32Array(buf, o, n * 3); o += n * 12;
+    var nrm = new Int8Array(buf, o, n * 3); o += n * 3; o += (4 - o % 4) % 4;
+    var col = new Uint8Array(buf, o, n * 3); o += n * 3; o += (4 - o % 4) % 4;
+    var idx = json.index === 32 ? new Uint32Array(buf, o, t * 3)
+                                : new Uint16Array(buf, o, t * 3);
+    return { pos: pos, nrm: nrm, col: col, idx: idx, box: json.box, tris: t };
+  }
+
+  var modelRebuild = null;
+  function loadModels() {
+    if (modelsWanted) return;
+    modelsWanted = true;
+    Object.keys(MODELS).forEach(function (k) {
+      var mdl = MODELS[k];
+      fetch(mdl.url).then(function (r) {
+        if (!r.ok) throw new Error(r.status + ' ' + mdl.url);
+        return r.arrayBuffer();
+      }).then(function (buf) {
+        mdl.mesh = readModel(buf);
+        /* Three files land at three moments; lay the site out once for
+           the lot of them rather than once each. */
+        clearTimeout(modelRebuild);
+        modelRebuild = setTimeout(function () {
+          siteKey = '';
+          placeSite();
+          map.triggerRepaint();
+        }, 60);
+      }).catch(function (e) {
+        mdl.failed = String((e && e.message) || e);
+        /* The site still stands, in boxes — but say why it looks plain. */
+        if (window.console && console.warn) {
+          console.warn('Launch site model ' + mdl.url + ' could not be loaded (' +
+                       mdl.failed + '); falling back to plain shapes.');
+        }
+      });
+    });
+  }
 
   function siteMesh(cfg) {
     var merc = [], globe = [], look = [];
@@ -2021,14 +2089,22 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var m = metresPerDegree(cfg.pad.lat);
 
     /* local metres → the two projections */
-    function push(x, y, z, shade, kind) {
+    function place(x, y, z) {
       var lng = cfg.pad.lng + (x * sinAz - y * cosAz) / m.lng;
       var lat = cfg.pad.lat + (x * cosAz + y * sinAz) / m.lat;
       var alt = cfg.pad.alt + z;
       var mp = mercPoint(lng, lat, alt), gp = globePoint(lng, lat, alt);
       merc.push(mp[0], mp[1], mp[2]);
       globe.push(gp[0], gp[1], gp[2]);
-      look.push(shade, kind);
+    }
+    function push(x, y, z, shade, kind) {
+      place(x, y, z);
+      var c = KIND[kind];
+      look.push(shade, c[0], c[1], c[2]);
+    }
+    function pushRGB(x, y, z, shade, r, g, b) {
+      place(x, y, z);
+      look.push(shade, r, g, b);
     }
     function shadeOf(n) {
       var d = n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2];
@@ -2078,26 +2154,52 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
             (cz - barH - 0.5) / 2, 0, 1);
       }
     }
-    /* the breech house at the near end */
+    /* the breech house at the near end, which the hangar stands over */
     box(-3.4, 0, 2.2, 3.4, halfGap + 2.4, 2.2, 0, 1);
 
-    /* ── the bank: one tower per half farad, ranked up alongside ── */
+    /* ── a loaded model, dropped into the mesh at an offset ── */
+    function model(mdl, ox, oy, oz) {
+      var p = mdl.pos, nr = mdl.nrm, cl = mdl.col, ix = mdl.idx;
+      for (var k = 0; k < ix.length; k++) {
+        var v = ix[k], v3 = v * 3;
+        pushRGB(ox + p[v3], oy + p[v3 + 1], oz + p[v3 + 2],
+                shadeOf([nr[v3] / 127, nr[v3 + 1] / 127, nr[v3 + 2] / 127]),
+                cl[v3] / 255, cl[v3 + 1] / 255, cl[v3 + 2] / 255);
+      }
+    }
+
+    /* ── the hangar, its gate on the pad so the rail runs out of it ── */
+    var hangar = MODELS.hangar.mesh;
+    var backWall = hangar ? hangar.box[0] : -18;
+    if (hangar) model(hangar, 0, 0, 0);
+
+    /* ── the bank: one tank per half farad, laid out in a yard ──
+       Tanks lie down and rank up in a grid behind the hangar, the rows
+       set out so the yard comes out roughly square whatever the bank. */
     var nTower = Math.max(1, Math.min(MAX_TOWERS, Math.ceil(cfg.cap / TOWER_F)));
-    var perRow = Math.max(1, Math.round(Math.sqrt(nTower * 0.7)));
-    var rows = Math.ceil(nTower / perRow);
-    var yard = -10;                                   /* behind the breech */
+    var tank = nTower > FAR_TANKS ? (MODELS.tankFar.mesh || MODELS.tank.mesh)
+                                  : MODELS.tank.mesh;
+    var deep = tank ? tank.box[3] - tank.box[0] : TOWER_W;   /* along the shot */
+    var wide = tank ? tank.box[4] - tank.box[1] : TOWER_W;   /* across it */
+    var pitchX = deep + (tank ? 3.2 : TOWER_PITCH - TOWER_W);
+    var pitchY = wide + (tank ? 3.2 : TOWER_PITCH - TOWER_W);
+    var perRow = Math.max(1, Math.round(Math.sqrt(nTower * pitchX / pitchY)));
+    var yard = backWall - 8 - deep / 2;                /* clear of the hangar */
     var towerTops = [];
     for (var ti = 0; ti < nTower; ti++) {
       var col = ti % perRow, row = Math.floor(ti / perRow);
-      var tx = yard - row * TOWER_PITCH;
-      var ty = (col - (perRow - 1) / 2) * TOWER_PITCH;
-      box(tx, ty, TOWER_H / 2, TOWER_W / 2, TOWER_W / 2, TOWER_H / 2, 0, 2);
-      /* three insulator bands, so a tower reads as a tower */
-      for (var b2 = 0; b2 < 3; b2++) {
-        box(tx, ty, TOWER_H * (0.3 + b2 * 0.22),
-            TOWER_W * 0.58, TOWER_W * 0.58, 0.16, 0, 3);
+      var tx = yard - row * pitchX;
+      var ty = (col - (perRow - 1) / 2) * pitchY;
+      if (tank) {
+        model(tank, tx, ty, 0);
+      } else {
+        box(tx, ty, TOWER_H / 2, TOWER_W / 2, TOWER_W / 2, TOWER_H / 2, 0, 2);
+        for (var b2 = 0; b2 < 3; b2++) {
+          box(tx, ty, TOWER_H * (0.3 + b2 * 0.22),
+              TOWER_W * 0.58, TOWER_W * 0.58, 0.16, 0, 3);
+        }
       }
-      if (row === 0) towerTops.push([tx, ty, TOWER_H + 0.4]);
+      if (row === 0) towerTops.push([tx, ty, (tank ? tank.box[5] : TOWER_H) + 0.4]);
     }
 
     /* ── cables: bezier from the front rank to the breech ──
@@ -2108,10 +2210,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var SIDES = 9, STEPS = 26;
     for (var ci = 0; ci < towerTops.length; ci++) {
       var a = towerTops[ci];
-      var bx = -3.4, by = a[1] * 0.25, bz = 4.2;
-      /* two handles: out of the tower head, then down into the breech */
-      var h1 = [a[0] + 4, a[1], a[2] + 1.2];
-      var h2 = [bx - 5, by, bz - 3.5];
+      /* into the back wall of the hangar, where the breech is */
+      var bx = backWall + 0.6, by = a[1] * 0.25, bz = 4.4;
+      /* two handles: up off the tank, then down into the wall */
+      var h1 = [a[0] + 4, a[1], a[2] + 2.4];
+      var h2 = [bx - 7, by, bz + 1.5];
       var prev = null;
       for (var st = 0; st <= STEPS; st++) {
         var u = st / STEPS, w = 1 - u;
@@ -2154,8 +2257,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
     return {
       merc: new Float32Array(merc), globe: new Float32Array(globe),
-      look: new Float32Array(look), count: look.length / 2,
-      towers: nTower, segments: nSeg, segLen: segLen, cableR: radius
+      look: new Float32Array(look), count: look.length / 4,
+      tanks: nTower, segments: nSeg, segLen: segLen, cableR: radius
     };
   }
 
@@ -2290,7 +2393,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         gl.uniform4f(W.uClip, plane[0], plane[1], plane[2], plane[3]);
         gl.uniform1f(W.uTrans, t);
         [[W.aMerc, siteGeo.mercBuf, 3], [W.aGlobe, siteGeo.globeBuf, 3],
-         [W.aLook, siteGeo.lookBuf, 2]].forEach(function (a) {
+         [W.aLook, siteGeo.lookBuf, 4]].forEach(function (a) {
           gl.bindBuffer(gl.ARRAY_BUFFER, a[1]);
           gl.enableVertexAttribArray(a[0]);
           gl.vertexAttribPointer(a[0], a[2], gl.FLOAT, false, 0, 0);
@@ -2466,6 +2569,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       siteGeo = null; siteKey = '';
       return;
     }
+    /* Nothing needs the models until there is a site to stand them on. */
+    loadModels();
     var cfg = {
       pad: pad, azimuth: solution.azimuth, angle: solution.angle,
       railLen: solution.railLen, gap: solution.gap, railH: solution.railH,
@@ -4421,8 +4526,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     $('cap').value = String(Number(total.toPrecision(10)));
     $('bankmix').innerHTML = n + ' module' + (n === 1 ? '' : 's') + ' × <b>' +
       $('bankSize').options[$('bankSize').selectedIndex].textContent +
-      '</b> &nbsp;=&nbsp; <b>' + sig(total, 4) + ' F</b>, standing as <b>' +
-      Math.max(1, Math.ceil(total / TOWER_F)) + '</b> towers on the pad.';
+      '</b> &nbsp;=&nbsp; <b>' + sig(total, 4) + ' F</b>, laid out as <b>' +
+      Math.max(1, Math.ceil(total / TOWER_F)) + '</b> tanks in the yard.';
     solve();
   }
 
