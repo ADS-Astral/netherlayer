@@ -1,0 +1,3 @@
+# tile and CDN cache, and the screenshots the runs leave behind
+.cache/
+*.png
