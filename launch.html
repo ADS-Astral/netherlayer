@@ -2122,9 +2122,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     site3d.hangar = hg;
     site3d.hangarBox = new THREE.Box3().setFromObject(hg);
 
-    /* The doors open, and stay open — the clips are played to their end
-       and held there. Both leaves swing about ninety degrees, which
-       leaves the whole seven metres of the aperture clear. */
+    /* The gate starts shut. Visiting the rails opens it — both leaves
+       swing about ninety degrees, which clears the whole seven metres of
+       the aperture — and it stays open until the flight is over. */
     if (hangarGltf.animations && hangarGltf.animations.length) {
       var mixer = new THREE.AnimationMixer(hangar);
       hangarGltf.animations.forEach(function (clip) {
@@ -2133,9 +2133,13 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         act.loop = THREE.LoopOnce;
         act.play();
       });
-      mixer.setTime(hangarGltf.animations[0].duration);
-      site3d.mixers.push(mixer);
+      site3d.doors = { mixer: mixer, dur: hangarGltf.animations[0].duration, at: 0, want: 0 };
+      mixer.setTime(0);
+      /* open, the leaves stand outside the wall, so the box is measured
+         with the gate at its widest rather than at rest */
+      mixer.setTime(site3d.doors.dur);
       site3d.hangarBox = new THREE.Box3().setFromObject(hg);
+      mixer.setTime(0);
     }
 
     /* ── the tanks, as one instanced draw however many there are ── */
@@ -2233,6 +2237,73 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       spots.push([yard - row * pitchX, (col - (perRow - 1) / 2) * pitchY]);
     }
     return { n: n, spots: spots };
+  }
+
+  /* ── Working the gate ─────────────────────────────────────────────
+     The clips are driven by hand rather than by a clock of their own, so
+     the leaves can be sent either way and the map only redraws while
+     they are actually moving. */
+  var doorTick = null;
+  function setDoors(open) {
+    var d = site3d.doors;
+    if (!d) return;
+    d.want = open ? d.dur : 0;
+    if (doorTick || d.at === d.want) return;
+    var last = performance.now();
+    doorTick = requestAnimationFrame(function step(now) {
+      var dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      var gap = d.want - d.at;
+      var move = Math.min(Math.abs(gap), dt);
+      d.at += gap > 0 ? move : -move;
+      d.mixer.setTime(d.at);
+      map.triggerRepaint();
+      doorTick = Math.abs(d.want - d.at) < 1e-4 ? null : requestAnimationFrame(step);
+    });
+  }
+
+  /* A point in the site's own metres — x along the shot, y to its left,
+     z up off the pad — as somewhere the camera can be sent. */
+  function sitePoint(x, y, z) {
+    if (!pad) return null;
+    var az = (solution ? solution.azimuth : Number($('azimuth').value) || 0) * D2R;
+    var sa = Math.sin(az), ca = Math.cos(az), m = metresPerDegree(pad.lat);
+    return { lng: pad.lng + (x * sa - y * ca) / m.lng,
+             lat: pad.lat + (x * ca + y * sa) / m.lat,
+             alt: pad.alt + z };
+  }
+
+  /* ── What a station shows you ──────────────────────────────────────
+     Three of them are about something you can go and look at, so opening
+     one takes the camera there. The rest leave the view alone. */
+  function stationView(pane) {
+    if (!pad || flight.active) return;
+    if (pane === 'p-target') {
+      /* far enough out that a whole trajectory would fit in the frame */
+      map.easeTo({ center: [pad.lng, pad.lat], zoom: 2.7, pitch: 0, bearing: 0,
+                   elevation: 0, duration: 1600 });
+      return;
+    }
+    if (pane === 'p-rails') {
+      /* stood off the gate, looking back down the rail and into the shed */
+      var eye = sitePoint(46, 0, 7), aim = sitePoint(-7, 0, 3.2);
+      if (eye && aim) map.easeTo(Object.assign(solveCamera(eye, aim), { duration: 1600 }));
+      setDoors(true);
+      return;
+    }
+    if (pane === 'p-bank') {
+      var spots = bankLayout(solution ? solution.cap : 20).spots;
+      var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+      for (var i = 0; i < spots.length; i++) for (var c = 0; c < 2; c++) {
+        lo[c] = Math.min(lo[c], spots[i][c]); hi[c] = Math.max(hi[c], spots[i][c]);
+      }
+      var cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+      var span = Math.max(hi[0] - lo[0], hi[1] - lo[1]) + 40;
+      /* three quarters on and well up, so the ranks read as ranks */
+      var e = sitePoint(cx - span * 0.62, cy + span * 0.62, span * 0.66);
+      var t = sitePoint(cx, cy, 3);
+      if (e && t) map.easeTo(Object.assign(solveCamera(e, t), { duration: 1600 }));
+    }
   }
 
   /* Where the models stand: one matrix from site metres to the map's own
@@ -3898,6 +3969,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
   function endFlight() {
     flight.active = false;
+    setDoors(false);            /* shut again, ready for the next one */
     flight.playing = false;
     if (flight.raf) cancelAnimationFrame(flight.raf);
     flight.raf = null;
@@ -5007,6 +5079,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       });
       /* The destination list is only worth drawing when it is on show. */
       if (b.dataset.pane === 'p-target') showDestination();
+      stationView(b.dataset.pane);
       /* Bring the station's own contents up under the rail rather than
          jumping to the very bottom of everything. */
       var sc = $('conscroll'), dk = $('deck'), st = $('stations');
