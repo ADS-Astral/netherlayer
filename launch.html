@@ -2126,18 +2126,21 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
        swing about ninety degrees, which clears the whole seven metres of
        the aperture — and it stays open until the flight is over. */
     if (hangarGltf.animations && hangarGltf.animations.length) {
+      /* The clips are scrubbed, not played, so they must never reach the
+         state three.js calls finished — a clamped LoopOnce action stops
+         being posed at all, and the leaves freeze wherever they stopped. */
       var mixer = new THREE.AnimationMixer(hangar);
       hangarGltf.animations.forEach(function (clip) {
         var act = mixer.clipAction(clip);
-        act.clampWhenFinished = true;
-        act.loop = THREE.LoopOnce;
+        act.clampWhenFinished = false;
+        act.loop = THREE.LoopRepeat;
         act.play();
       });
-      site3d.doors = { mixer: mixer, dur: hangarGltf.animations[0].duration, at: 0, want: 0 };
-      mixer.setTime(0);
+      var swing = hangarGltf.animations[0].duration * 0.999;
+      site3d.doors = { mixer: mixer, dur: swing, at: 0, want: 0 };
       /* open, the leaves stand outside the wall, so the box is measured
          with the gate at its widest rather than at rest */
-      mixer.setTime(site3d.doors.dur);
+      mixer.setTime(swing);
       site3d.hangarBox = new THREE.Box3().setFromObject(hg);
       mixer.setTime(0);
     }

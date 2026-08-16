@@ -92,9 +92,16 @@ const done = (code) => { clearTimeout(WATCHDOG); if (code) process.exitCode = co
   const target = await press('Target');
   console.log('press Target   ', JSON.stringify(target), target.zoom < 5 ? '← out to the globe' : '*** still close in');
 
-  const rails = await press('Rails');
-  console.log('press Rails    ', JSON.stringify(rails));
+  /* Press the rails, let the camera settle, then shoot the gate twice:
+     same camera, so only the leaves can differ between the frames. */
+  await p.evaluate(() => [...document.querySelectorAll('#stations .stn')]
+    .find(b => b.querySelector('em').textContent === 'Rails').click());
+  await p.waitForTimeout(2400);
+  await shot({ path: OUT + 'S-gate-a.png' });
+  await p.waitForTimeout(6000);
   await shot({ path: OUT + 'S-gate-open.png' });
+  const rails = await cam();
+  console.log('press Rails    ', JSON.stringify(rails));
 
   const bank = await press('Bank');
   console.log('press Bank     ', JSON.stringify(bank));
