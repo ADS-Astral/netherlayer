@@ -38,12 +38,16 @@ const done = (code) => { clearTimeout(WATCHDOG); if (code) process.exitCode = co
     (e) => console.log('!! screenshot skipped: ' + String(e.message).split('\n')[0]));
   const errs = [], got = [];
   p.on('pageerror', e => errs.push('ERR ' + e.message.slice(0, 220)));
+  p.on('console', m => { if (/round model/i.test(m.text())) errs.push('MODEL ' + m.text().slice(0, 140)); });
   p.on('console', m => { if (m.type() === 'error' && !/ERR_FAILED|Failed to load resource/.test(m.text())) errs.push('CON ' + m.text().slice(0, 140)); });
   await p.route('**/*', async r => {
     const u = r.request().url();
     if (u.startsWith('https://netherlayer.local/')) {
       const f = SITE + decodeURIComponent(u.split('/').pop().split('?')[0]);
       if (f.endsWith('.glb')) got.push(f.split('/').pop());
+      /* BLOCK=1 denies the round, so a run with it and a run without it can
+         be compared: if the frames match, the model is not being drawn. */
+      if (process.env.BLOCK && /missile/.test(f)) return r.fulfill({ status: 404, body: '' });
       return r.fulfill({ path: f, contentType: f.endsWith('.glb') ? 'model/gltf-binary' : 'text/html; charset=utf-8' });
     }
     if (u.startsWith('https://unpkg.com/')) {
@@ -97,7 +101,7 @@ const done = (code) => { clearTimeout(WATCHDOG); if (code) process.exitCode = co
       });
     });
     await p.waitForTimeout(1200);
-    await shot({ path: OUT + 'M-' + tag + '-' + cam.toLowerCase() + '.png' });
+    await shot({ path: OUT + (process.env.BLOCK ? 'B-' : 'M-') + tag + '-' + cam.toLowerCase() + '.png' });
     await p.evaluate(() => {
       ['panel', 'flightbar', 'hud', 'rightrail', 'aimchip'].forEach((id) => {
         const e = document.getElementById(id); if (e) e.style.visibility = '';
