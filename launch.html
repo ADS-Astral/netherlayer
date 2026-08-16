@@ -8,6 +8,16 @@
 <meta name="build" content="2026-08-05"/>
 <meta name="description" content="Pick a launch pad on real 3D terrain, solve the railgun shot, then fly the trajectory the physics predicts from the pad, the chase, the nose or the tail."/>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css"/>
+<!-- The launch site models are glTF, so three.js loads them. Neither this
+     nor the models are fetched until there is a site to stand on the pad. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
 <style>
 /* ─── Design tokens (shared with the Netherlayer site) ─── */
 :root {
@@ -2010,7 +2020,6 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   var TOWER_W = 2.2, TOWER_H = 6.4, TOWER_PITCH = 3.4;   /* the stand-in can */
   var SEGMENT_M = 10;      /* a shipped length of rail */
   var MAX_TOWERS = 260, MAX_SEGMENTS = 220;
-  var FAR_TANKS = 80;      /* past this many, the cheap tank is enough */
 
   /* The colours the hand-built parts are drawn in. The models carry their
      own, baked off their textures when they were prepared. */
@@ -2022,64 +2031,241 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     [0.34, 0.22, 0.14]     /* 4 cable */
   ];
 
-  /* ── The models ────────────────────────────────────────────────────
-     Prepared from the source glTF: the scene graph flattened, the two
-     door armatures posed at the end of their opening animation, the base
-     colour textures sampled onto every vertex, and the whole thing
-     simplified to something a map can carry. Positions are already in
-     site metres — x along the shot, y left, z up — with the hangar's gate
-     plane on the pad origin and each model standing on z = 0.
+  /* ── The launch site models ───────────────────────────────────────
+     The hangar and the capacitor tank are glTF, loaded as they were
+     authored — full geometry, their own materials and textures, and the
+     hangar's two door armatures still carrying their opening animation.
+     three.js draws them into MapLibre's own context through a custom
+     layer, so they sit in the terrain rather than on top of it.
 
-     They are fetched once, on demand. Until they arrive, and for good if
-     they never do, the site falls back to the boxes it always drew. */
-  var MODELS = {
-    hangar: { url: 'site-hangar.bin' },
-    tank: { url: 'site-captank.bin' },
-    tankFar: { url: 'site-captank-far.bin' }
+     Nothing here is fetched until there is a site to stand on the pad.
+     If any of it fails to arrive the site still stands, in the plain
+     shapes it always drew. */
+  var MODEL_URL = {
+    hangar: 'Arched%20hangar_Animed.glb',
+    tank: 'Cap_Tank_new.glb'
   };
-  var modelsWanted = false;
+  var site3d = {
+    wanted: false, ready: false, failed: null,
+    THREE: null, renderer: null, scene: null, camera: null,
+    root: null, hangar: null, tanks: [], mixers: [],
+    tankBox: null, hangarBox: null, gateX: 0
+  };
 
-  function readModel(buf) {
-    var head = new Uint32Array(buf, 0, 1)[0];
-    var json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, head))
-                          .replace(/\0+$/, ''));
-    var o = 4 + head, n = json.verts, t = json.tris;
-    var pos = new Float32Array(buf, o, n * 3); o += n * 12;
-    var nrm = new Int8Array(buf, o, n * 3); o += n * 3; o += (4 - o % 4) % 4;
-    var col = new Uint8Array(buf, o, n * 3); o += n * 3; o += (4 - o % 4) % 4;
-    var idx = json.index === 32 ? new Uint32Array(buf, o, t * 3)
-                                : new Uint16Array(buf, o, t * 3);
-    return { pos: pos, nrm: nrm, col: col, idx: idx, box: json.box, tris: t };
+  /* The models are authored Y up. The site is built x along the shot,
+     y to the left, z up, so each one is turned into that frame once and
+     then only ever moved. */
+  function siteFrame(THREE, order) {
+    var m = new THREE.Matrix4();
+    /* rows pick which model axis becomes which site axis */
+    if (order === 'hangar') {
+      /* +Z out of the gate becomes +x along the shot */
+      m.set(0, 0, 1, 0,
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 0, 1);
+    } else {
+      /* the tank lies across the shot, its long axis on y */
+      m.set(1, 0, 0, 0,
+            0, 0, -1, 0,
+            0, 1, 0, 0,
+            0, 0, 0, 1);
+    }
+    return m;
   }
 
-  var modelRebuild = null;
-  function loadModels() {
-    if (modelsWanted) return;
-    modelsWanted = true;
-    Object.keys(MODELS).forEach(function (k) {
-      var mdl = MODELS[k];
-      fetch(mdl.url).then(function (r) {
-        if (!r.ok) throw new Error(r.status + ' ' + mdl.url);
-        return r.arrayBuffer();
-      }).then(function (buf) {
-        mdl.mesh = readModel(buf);
-        /* Three files land at three moments; lay the site out once for
-           the lot of them rather than once each. */
-        clearTimeout(modelRebuild);
-        modelRebuild = setTimeout(function () {
-          siteKey = '';
-          placeSite();
-          map.triggerRepaint();
-        }, 60);
-      }).catch(function (e) {
-        mdl.failed = String((e && e.message) || e);
-        /* The site still stands, in boxes — but say why it looks plain. */
+  function loadSiteModels() {
+    if (site3d.wanted) return;
+    site3d.wanted = true;
+    Promise.all([import('three'), import('three/addons/loaders/GLTFLoader.js')])
+      .then(function (mods) {
+        var THREE = mods[0], GLTFLoader = mods[1].GLTFLoader;
+        site3d.THREE = THREE;
+        var loader = new GLTFLoader();
+        var one = function (url) {
+          return new Promise(function (res, rej) { loader.load(url, res, null, rej); });
+        };
+        return Promise.all([one(MODEL_URL.hangar), one(MODEL_URL.tank)])
+          .then(function (g) { buildSiteScene(THREE, g[0], g[1]); });
+      })
+      .catch(function (e) {
+        site3d.failed = String((e && e.message) || e);
         if (window.console && console.warn) {
-          console.warn('Launch site model ' + mdl.url + ' could not be loaded (' +
-                       mdl.failed + '); falling back to plain shapes.');
+          console.warn('Launch site models could not be loaded (' + site3d.failed +
+                       '); falling back to plain shapes.');
         }
+        siteKey = '';
+        placeSite();
       });
+  }
+
+  function buildSiteScene(THREE, hangarGltf, tankGltf) {
+    var scene = new THREE.Scene();
+
+    /* ── the hangar, turned into site axes and sat on the pad ──
+       Its gate plane goes on the pad origin, so the rail starts in the
+       open doorway and rises away without ever crossing the building,
+       and the floor inside goes to ground level. */
+    var hangar = hangarGltf.scene;
+    hangar.updateWorldMatrix(true, true);
+    var facade = hangar.getObjectByName('facade');
+    var slab = hangar.getObjectByName('foundation');
+    var gateZ = facade ? new THREE.Box3().setFromObject(facade).getCenter(new THREE.Vector3()).z : 0;
+    var floorY = slab ? new THREE.Box3().setFromObject(slab).max.y : 0;
+
+    var hg = new THREE.Group();
+    hg.add(hangar);
+    hg.applyMatrix4(siteFrame(THREE, 'hangar'));
+    hg.position.set(-gateZ, 0, -floorY);
+    hg.updateMatrixWorld(true);
+    scene.add(hg);
+    site3d.hangar = hg;
+    site3d.hangarBox = new THREE.Box3().setFromObject(hg);
+
+    /* The doors open, and stay open — the clips are played to their end
+       and held there. Both leaves swing about ninety degrees, which
+       leaves the whole seven metres of the aperture clear. */
+    if (hangarGltf.animations && hangarGltf.animations.length) {
+      var mixer = new THREE.AnimationMixer(hangar);
+      hangarGltf.animations.forEach(function (clip) {
+        var act = mixer.clipAction(clip);
+        act.clampWhenFinished = true;
+        act.loop = THREE.LoopOnce;
+        act.play();
+      });
+      mixer.setTime(hangarGltf.animations[0].duration);
+      site3d.mixers.push(mixer);
+      site3d.hangarBox = new THREE.Box3().setFromObject(hg);
+    }
+
+    /* ── the tanks, as one instanced draw however many there are ── */
+    var tg = new THREE.Group();
+    tg.add(tankGltf.scene);
+    tg.applyMatrix4(siteFrame(THREE, 'tank'));
+    tg.updateMatrixWorld(true);
+    var tb = new THREE.Box3().setFromObject(tg);
+    var mid = tb.getCenter(new THREE.Vector3());
+    /* centred across and along, standing on the ground */
+    var settle = new THREE.Matrix4().makeTranslation(-mid.x, -mid.y, -tb.min.z);
+    site3d.tankBox = tb.clone().applyMatrix4(settle);
+
+    site3d.tanks = [];
+    tg.updateWorldMatrix(true, true);
+    tg.traverse(function (o) {
+      if (!o.isMesh) return;
+      var geo = o.geometry.clone();
+      geo.applyMatrix4(o.matrixWorld);
+      geo.applyMatrix4(settle);
+      var inst = new THREE.InstancedMesh(geo, o.material, MAX_TOWERS);
+      inst.count = 0;
+      inst.frustumCulled = false;
+      inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      scene.add(inst);
+      site3d.tanks.push(inst);
     });
+
+    scene.traverse(function (o) { o.frustumCulled = false; });
+
+    /* Enough light to read the shapes by, warm from the sun side and
+       cool off the sky, matching the map's own daylight. */
+    scene.add(new THREE.HemisphereLight(0xbcd2ff, 0x6b563c, 2.2));
+    var sun = new THREE.DirectionalLight(0xfff0d0, 2.6);
+    sun.position.set(-0.5, 0.6, 1.0);
+    scene.add(sun);
+    var fill = new THREE.DirectionalLight(0x9fb4d8, 0.8);
+    fill.position.set(0.8, -0.7, 0.35);
+    scene.add(fill);
+
+    site3d.scene = scene;
+    site3d.camera = new THREE.Camera();
+    site3d.local = new THREE.Matrix4();
+    site3d.ready = true;
+
+    map.addLayer({
+      id: 'site-models',
+      type: 'custom',
+      renderingMode: '3d',
+      onAdd: function (m, gl) {
+        site3d.renderer = new THREE.WebGLRenderer({ canvas: m.getCanvas(), context: gl });
+        site3d.renderer.autoClear = false;
+        site3d.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      },
+      render: function (gl, args) {
+        if (!site3d.show || !site3d.renderer) return;
+        var pd = args && args.defaultProjectionData;
+        if (!pd || !pd.mainMatrix) return;
+        /* On the globe the whole site is a fraction of a pixel, and the
+           globe's vertex transform is not a matrix, so it is left out. */
+        if ((pd.projectionTransition || 0) > 0.001) return;
+        var mat = new THREE.Matrix4().fromArray(pd.mainMatrix).multiply(site3d.local);
+        site3d.camera.projectionMatrix = mat;
+        site3d.camera.projectionMatrixInverse.copy(mat).invert();
+        site3d.renderer.resetState();
+        site3d.renderer.setViewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        site3d.renderer.render(site3d.scene, site3d.camera);
+        site3d.renderer.resetState();
+      }
+    });
+
+    siteKey = '';
+    placeSite();
+    map.triggerRepaint();
+  }
+
+  /* ── Where the yard goes ──────────────────────────────────────────
+     One place decides it, because two things need the answer: three.js
+     stands a tank on every spot, and the cable run has to find the front
+     rank. Sizes come from the models when they are up and from the
+     stand-in can when they are not. */
+  function bankLayout(cap) {
+    var n = Math.max(1, Math.min(MAX_TOWERS, Math.ceil(cap / TOWER_F)));
+    var tb = site3d.tankBox, hb = site3d.hangarBox;
+    var deep = tb ? tb.max.x - tb.min.x : TOWER_W;      /* along the shot */
+    var wide = tb ? tb.max.y - tb.min.y : TOWER_W;      /* across it */
+    var high = tb ? tb.max.z : TOWER_H;
+    var gap = tb ? 3.2 : TOWER_PITCH - TOWER_W;
+    var pitchX = deep + gap, pitchY = wide + gap;
+    var backWall = hb ? hb.min.x : -18;
+    var perRow = Math.max(1, Math.round(Math.sqrt(n * pitchX / pitchY)));
+    var yard = backWall - 8 - deep / 2;                 /* clear of the hangar */
+    var spots = [], tops = [];
+    for (var i = 0; i < n; i++) {
+      var col = i % perRow, row = Math.floor(i / perRow);
+      var x = yard - row * pitchX;
+      var y = (col - (perRow - 1) / 2) * pitchY;
+      spots.push([x, y]);
+      if (row === 0) tops.push([x, y, high + 0.4]);
+    }
+    return { n: n, spots: spots, tops: tops, backWall: backWall };
+  }
+
+  /* Where the models stand: one matrix from site metres to the map's own
+     mercator, and one instance matrix per tank. */
+  function placeSiteModels(cfg, spots) {
+    if (!site3d.ready) return;
+    var THREE = site3d.THREE;
+    var mc = maplibregl.MercatorCoordinate.fromLngLat(
+      { lng: cfg.pad.lng, lat: cfg.pad.lat }, cfg.pad.alt);
+    var s = mc.meterInMercatorCoordinateUnits();
+    var sa = Math.sin(cfg.azimuth * D2R), ca = Math.cos(cfg.azimuth * D2R);
+    /* x runs along the shot and y to its left; mercator y grows south */
+    site3d.local.set(
+      s * sa, -s * ca, 0, mc.x,
+      -s * ca, -s * sa, 0, mc.y,
+      0, 0, s, mc.z,
+      0, 0, 0, 1);
+
+    var mtx = new THREE.Matrix4();
+    for (var t = 0; t < site3d.tanks.length; t++) {
+      var inst = site3d.tanks[t];
+      var n = Math.min(spots.length, inst.instanceMatrix.count);
+      for (var i = 0; i < n; i++) {
+        mtx.makeTranslation(spots[i][0], spots[i][1], 0);
+        inst.setMatrixAt(i, mtx);
+      }
+      inst.count = n;
+      inst.instanceMatrix.needsUpdate = true;
+    }
   }
 
   function siteMesh(cfg) {
@@ -2101,10 +2287,6 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       place(x, y, z);
       var c = KIND[kind];
       look.push(shade, c[0], c[1], c[2]);
-    }
-    function pushRGB(x, y, z, shade, r, g, b) {
-      place(x, y, z);
-      look.push(shade, r, g, b);
     }
     function shadeOf(n) {
       var d = n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2];
@@ -2157,50 +2339,26 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     /* the breech house at the near end, which the hangar stands over */
     box(-3.4, 0, 2.2, 3.4, halfGap + 2.4, 2.2, 0, 1);
 
-    /* ── a loaded model, dropped into the mesh at an offset ── */
-    function model(mdl, ox, oy, oz) {
-      var p = mdl.pos, nr = mdl.nrm, cl = mdl.col, ix = mdl.idx;
-      for (var k = 0; k < ix.length; k++) {
-        var v = ix[k], v3 = v * 3;
-        pushRGB(ox + p[v3], oy + p[v3 + 1], oz + p[v3 + 2],
-                shadeOf([nr[v3] / 127, nr[v3 + 1] / 127, nr[v3 + 2] / 127]),
-                cl[v3] / 255, cl[v3 + 1] / 255, cl[v3 + 2] / 255);
-      }
-    }
-
-    /* ── the hangar, its gate on the pad so the rail runs out of it ── */
-    var hangar = MODELS.hangar.mesh;
-    var backWall = hangar ? hangar.box[0] : -18;
-    if (hangar) model(hangar, 0, 0, 0);
-
-    /* ── the bank: one tank per half farad, laid out in a yard ──
-       Tanks lie down and rank up in a grid behind the hangar, the rows
-       set out so the yard comes out roughly square whatever the bank. */
-    var nTower = Math.max(1, Math.min(MAX_TOWERS, Math.ceil(cfg.cap / TOWER_F)));
-    var tank = nTower > FAR_TANKS ? (MODELS.tankFar.mesh || MODELS.tank.mesh)
-                                  : MODELS.tank.mesh;
-    var deep = tank ? tank.box[3] - tank.box[0] : TOWER_W;   /* along the shot */
-    var wide = tank ? tank.box[4] - tank.box[1] : TOWER_W;   /* across it */
-    var pitchX = deep + (tank ? 3.2 : TOWER_PITCH - TOWER_W);
-    var pitchY = wide + (tank ? 3.2 : TOWER_PITCH - TOWER_W);
-    var perRow = Math.max(1, Math.round(Math.sqrt(nTower * pitchX / pitchY)));
-    var yard = backWall - 8 - deep / 2;                /* clear of the hangar */
-    var towerTops = [];
-    for (var ti = 0; ti < nTower; ti++) {
-      var col = ti % perRow, row = Math.floor(ti / perRow);
-      var tx = yard - row * pitchX;
-      var ty = (col - (perRow - 1) / 2) * pitchY;
-      if (tank) {
-        model(tank, tx, ty, 0);
-      } else {
-        box(tx, ty, TOWER_H / 2, TOWER_W / 2, TOWER_W / 2, TOWER_H / 2, 0, 2);
+    /* ── the bank ──
+       One tank per half farad, lying on the ground in a yard behind the
+       hangar. The yard is set out here whether or not the models are up:
+       three.js stands a tank on each spot, and the cables reach the front
+       rank either way. Rows are chosen so the yard comes out roughly
+       square whatever the bank. */
+    var lay = bankLayout(cfg.cap);
+    var backWall = lay.backWall;
+    if (!site3d.ready) {
+      /* no models — the cans the site always drew */
+      for (var ti = 0; ti < lay.spots.length; ti++) {
+        var sp = lay.spots[ti];
+        box(sp[0], sp[1], TOWER_H / 2, TOWER_W / 2, TOWER_W / 2, TOWER_H / 2, 0, 2);
         for (var b2 = 0; b2 < 3; b2++) {
-          box(tx, ty, TOWER_H * (0.3 + b2 * 0.22),
+          box(sp[0], sp[1], TOWER_H * (0.3 + b2 * 0.22),
               TOWER_W * 0.58, TOWER_W * 0.58, 0.16, 0, 3);
         }
       }
-      if (row === 0) towerTops.push([tx, ty, (tank ? tank.box[5] : TOWER_H) + 0.4]);
     }
+    var towerTops = lay.tops;
 
     /* ── cables: bezier from the front rank to the breech ──
        Thicker for more copper: cross-section rises with the current the
@@ -2258,7 +2416,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return {
       merc: new Float32Array(merc), globe: new Float32Array(globe),
       look: new Float32Array(look), count: look.length / 4,
-      tanks: nTower, segments: nSeg, segLen: segLen, cableR: radius
+      tanks: lay.n, segments: nSeg, segLen: segLen, cableR: radius
     };
   }
 
@@ -2567,10 +2725,12 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (!gl) return;
     if (!pad || !solution || !$('showsite').checked) {
       siteGeo = null; siteKey = '';
+      site3d.show = false;
       return;
     }
     /* Nothing needs the models until there is a site to stand them on. */
-    loadModels();
+    loadSiteModels();
+    site3d.show = true;
     var cfg = {
       pad: pad, azimuth: solution.azimuth, angle: solution.angle,
       railLen: solution.railLen, gap: solution.gap, railH: solution.railH,
@@ -2595,6 +2755,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     gl.bufferData(gl.ARRAY_BUFFER, geo.look, gl.STATIC_DRAW);
     siteGeo.count = geo.count;
     siteGeo.info = geo;
+    /* and stand the models on the same ground the mesh was built for */
+    placeSiteModels(cfg, bankLayout(cfg.cap).spots);
   }
 
   /* ════════════════════════════════════════════════════════════
