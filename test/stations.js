@@ -14,7 +14,7 @@ const ct = u => u.includes('.png') ? 'image/png' : u.endsWith('.css') ? 'text/cs
 
 /* No harness may hang. A hard wall-clock budget that always exits, so a
    stalled frame can cost minutes but never the session. */
-const BUDGET = Number(process.env.BUDGET || 480) * 1000;
+const BUDGET = Number(process.env.BUDGET || 600) * 1000;
 const T0 = Date.now();
 let BROWSER = null;
 const WATCHDOG = setTimeout(() => {
@@ -63,53 +63,63 @@ const done = (code) => { clearTimeout(WATCHDOG); if (code) process.exitCode = co
      CDN files down first; every run after this one has them on disk. */
   for (const u of ['https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js',
                    'https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css']) await cf(u);
+  /* A fresh checkout has an empty cache, and fetching a megabyte of
+     MapLibre while the page is already booting loses the race. */
+  for (const u of ['https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js',
+                   'https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css']) await cf(u);
   await p.goto('https://netherlayer.local/launch.html', { waitUntil: 'load' });
   await p.waitForFunction(() => document.getElementById('loader').classList.contains('gone'), { timeout: 120000 }).catch(() => console.log('!! loader stuck'));
-  await p.waitForTimeout(9000);
+  await p.waitForTimeout(10000);
   await p.evaluate(() => { const e = document.getElementById('sharpness'); if (e) { e.value = 'soft'; e.dispatchEvent(new Event('change')); } });
-  await p.evaluate(() => { const c = document.getElementById('showsite'); if (c && c.checked) { c.checked = false; c.dispatchEvent(new Event('change')); } });
-  await p.waitForTimeout(4000);
+  await p.waitForFunction(() => !!window.netherlayerRange.getLayer('site-models'), { timeout: 300000 })
+    .catch(() => console.log('!! the site models never arrived'));
+  await p.waitForTimeout(6000);
 
-  console.log('missile.glb fetched:', got.length ? got.join(', ') : '(none)');
-  console.log('verdict:', await p.textContent('#flag'));
+  const cam = () => p.evaluate(() => {
+    const m = window.netherlayerRange, c = m.getCenter();
+    return { lng: +c.lng.toFixed(5), lat: +c.lat.toFixed(5), zoom: +m.getZoom().toFixed(2),
+             pitch: Math.round(m.getPitch()), bearing: Math.round(m.getBearing()) };
+  });
+  const press = async (name) => {
+    await p.evaluate(n => [...document.querySelectorAll('#stations .stn')]
+      .find(b => b.querySelector('em').textContent === n).click(), name);
+    await p.waitForTimeout(7000);
+    return cam();
+  };
 
+  console.log('at rest        ', JSON.stringify(await cam()));
+  console.log('press Pad      ', JSON.stringify(await press('Pad')));
+  const target = await press('Target');
+  console.log('press Target   ', JSON.stringify(target), target.zoom < 5 ? '← out to the globe' : '*** still close in');
+
+  /* Press the rails, let the camera settle, then shoot the gate twice:
+     same camera, so only the leaves can differ between the frames. */
+  await p.evaluate(() => [...document.querySelectorAll('#stations .stn')]
+    .find(b => b.querySelector('em').textContent === 'Rails').click());
+  await p.waitForTimeout(2400);
+  await shot({ path: OUT + 'S-gate-a.png' });
+  await p.waitForTimeout(6000);
+  await shot({ path: OUT + 'S-gate-open.png' });
+  const rails = await cam();
+  console.log('press Rails    ', JSON.stringify(rails));
+
+  const bank = await press('Bank');
+  console.log('press Bank     ', JSON.stringify(bank));
+  await shot({ path: OUT + 'S-bank.png' });
+
+  /* fly, land, leave — which should shut the gate again */
   await p.evaluate(() => document.getElementById('fire').click());
   await p.waitForTimeout(1500);
   await p.evaluate(() => { const b = document.getElementById('cd-skip'); if (b) b.click(); });
-  await p.waitForTimeout(4000);
-  await p.evaluate(() => document.getElementById('playpause').click());   /* hold it still */
-  await p.waitForTimeout(1500);
+  await p.waitForTimeout(5000);
+  await p.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /Exit flight/.test(x.textContent)); if (b) b.click(); });
+  await p.waitForTimeout(6000);
+  console.log('after the flight, flying =', await p.evaluate(() => document.body.classList.contains('flying')));
 
-  /* Scrub to a point where the round is clear of the rail and the ground,
-     then look at it from behind and from the side. */
-  for (const [tag, at, cam] of [['early', 12, 'Chase'], ['early', 12, 'Tail'],
-                                ['mid', 300, 'Chase'], ['mid', 300, 'Tail']]) {
-    await p.evaluate((v) => {
-      const e = document.getElementById('scrub');
-      e.value = String(v); e.dispatchEvent(new Event('input'));
-    }, at);
-    await p.waitForTimeout(2500);
-    await p.evaluate((c) => {
-      const b = [...document.querySelectorAll('.cams button')].find(x => x.textContent.trim().startsWith(c));
-      if (b) b.click();
-    }, cam);
-    await p.waitForTimeout(6000);
-    /* the console and the flight bar sit over the middle of the frame */
-    await p.evaluate(() => {
-      ['panel', 'flightbar', 'hud', 'rightrail', 'aimchip'].forEach((id) => {
-        const e = document.getElementById(id); if (e) e.style.visibility = 'hidden';
-      });
-    });
-    await p.waitForTimeout(1200);
-    await shot({ path: OUT + (process.env.BLOCK ? 'B-' : 'M-') + tag + '-' + cam.toLowerCase() + '.png' });
-    await p.evaluate(() => {
-      ['panel', 'flightbar', 'hud', 'rightrail', 'aimchip'].forEach((id) => {
-        const e = document.getElementById(id); if (e) e.style.visibility = '';
-      });
-    });
-    console.log('shot M-' + tag + '-' + cam.toLowerCase(), '·',
-      (await p.textContent('#hud')).replace(/\s+/g, ' ').trim().slice(0, 70));
-  }
+  /* back to exactly the gate view, with the gate now shut */
+  await p.evaluate((v) => window.netherlayerRange.jumpTo({ center: [v.lng, v.lat], zoom: v.zoom, pitch: v.pitch, bearing: v.bearing }), rails);
+  await p.waitForTimeout(8000);
+  await shot({ path: OUT + 'S-gate-shut.png' });
 
   console.log('\n' + (errs.length ? errs.slice(0, 6).join('\n') : 'no js errors'));
   await browser.close();

@@ -2122,20 +2122,27 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     site3d.hangar = hg;
     site3d.hangarBox = new THREE.Box3().setFromObject(hg);
 
-    /* The doors open, and stay open — the clips are played to their end
-       and held there. Both leaves swing about ninety degrees, which
-       leaves the whole seven metres of the aperture clear. */
+    /* The gate starts shut. Visiting the rails opens it — both leaves
+       swing about ninety degrees, which clears the whole seven metres of
+       the aperture — and it stays open until the flight is over. */
     if (hangarGltf.animations && hangarGltf.animations.length) {
+      /* The clips are scrubbed, not played, so they must never reach the
+         state three.js calls finished — a clamped LoopOnce action stops
+         being posed at all, and the leaves freeze wherever they stopped. */
       var mixer = new THREE.AnimationMixer(hangar);
       hangarGltf.animations.forEach(function (clip) {
         var act = mixer.clipAction(clip);
-        act.clampWhenFinished = true;
-        act.loop = THREE.LoopOnce;
+        act.clampWhenFinished = false;
+        act.loop = THREE.LoopRepeat;
         act.play();
       });
-      mixer.setTime(hangarGltf.animations[0].duration);
-      site3d.mixers.push(mixer);
+      var swing = hangarGltf.animations[0].duration * 0.999;
+      site3d.doors = { mixer: mixer, dur: swing, at: 0, want: 0 };
+      /* open, the leaves stand outside the wall, so the box is measured
+         with the gate at its widest rather than at rest */
+      mixer.setTime(swing);
       site3d.hangarBox = new THREE.Box3().setFromObject(hg);
+      mixer.setTime(0);
     }
 
     /* ── the tanks, as one instanced draw however many there are ── */
@@ -2233,6 +2240,73 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       spots.push([yard - row * pitchX, (col - (perRow - 1) / 2) * pitchY]);
     }
     return { n: n, spots: spots };
+  }
+
+  /* ── Working the gate ─────────────────────────────────────────────
+     The clips are driven by hand rather than by a clock of their own, so
+     the leaves can be sent either way and the map only redraws while
+     they are actually moving. */
+  var doorTick = null;
+  function setDoors(open) {
+    var d = site3d.doors;
+    if (!d) return;
+    d.want = open ? d.dur : 0;
+    if (doorTick || d.at === d.want) return;
+    var last = performance.now();
+    doorTick = requestAnimationFrame(function step(now) {
+      var dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      var gap = d.want - d.at;
+      var move = Math.min(Math.abs(gap), dt);
+      d.at += gap > 0 ? move : -move;
+      d.mixer.setTime(d.at);
+      map.triggerRepaint();
+      doorTick = Math.abs(d.want - d.at) < 1e-4 ? null : requestAnimationFrame(step);
+    });
+  }
+
+  /* A point in the site's own metres — x along the shot, y to its left,
+     z up off the pad — as somewhere the camera can be sent. */
+  function sitePoint(x, y, z) {
+    if (!pad) return null;
+    var az = (solution ? solution.azimuth : Number($('azimuth').value) || 0) * D2R;
+    var sa = Math.sin(az), ca = Math.cos(az), m = metresPerDegree(pad.lat);
+    return { lng: pad.lng + (x * sa - y * ca) / m.lng,
+             lat: pad.lat + (x * ca + y * sa) / m.lat,
+             alt: pad.alt + z };
+  }
+
+  /* ── What a station shows you ──────────────────────────────────────
+     Three of them are about something you can go and look at, so opening
+     one takes the camera there. The rest leave the view alone. */
+  function stationView(pane) {
+    if (!pad || flight.active) return;
+    if (pane === 'p-target') {
+      /* far enough out that a whole trajectory would fit in the frame */
+      map.easeTo({ center: [pad.lng, pad.lat], zoom: 2.7, pitch: 0, bearing: 0,
+                   elevation: 0, duration: 1600 });
+      return;
+    }
+    if (pane === 'p-rails') {
+      /* stood off the gate, looking back down the rail and into the shed */
+      var eye = sitePoint(46, 0, 7), aim = sitePoint(-7, 0, 3.2);
+      if (eye && aim) map.easeTo(Object.assign(solveCamera(eye, aim), { duration: 1600 }));
+      setDoors(true);
+      return;
+    }
+    if (pane === 'p-bank') {
+      var spots = bankLayout(solution ? solution.cap : 20).spots;
+      var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+      for (var i = 0; i < spots.length; i++) for (var c = 0; c < 2; c++) {
+        lo[c] = Math.min(lo[c], spots[i][c]); hi[c] = Math.max(hi[c], spots[i][c]);
+      }
+      var cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+      var span = Math.max(hi[0] - lo[0], hi[1] - lo[1]) + 40;
+      /* three quarters on and well up, so the ranks read as ranks */
+      var e = sitePoint(cx - span * 0.62, cy + span * 0.62, span * 0.66);
+      var t = sitePoint(cx, cy, 3);
+      if (e && t) map.easeTo(Object.assign(solveCamera(e, t), { duration: 1600 }));
+    }
   }
 
   /* Where the models stand: one matrix from site metres to the map's own
@@ -2443,7 +2517,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
             var g = groups[mi] || (groups[mi] = { pos: [], nrm: [], colour: null });
             if (!g.colour) {
               var f = ((json.materials && json.materials[mi] || {}).pbrMetallicRoughness || {})
-                        .baseColorFactor || [0.8, 0.8, 0.8, 1];
+                        .baseColorFactor || [1, 1, 1, 1];
               g.colour = [lin(f[0]), lin(f[1]), lin(f[2])];
             }
             for (var k = 0; k < count; k++) {
@@ -2483,33 +2557,65 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return groups;
   }
 
-  /* The model is authored nose down its own −Y with the tail fins at +Y,
-     and sits well away from the origin. Everything that flies here is
-     built nose at +z, a unit long, about the origin — so it is turned
-     and normalised once, keeping its real proportions. */
+  /* Everything that flies here is built nose at +z, a unit long, about the
+     origin. A model arrives however its author left it — this one came out
+     of SketchUp through Sketchfab, so its root carries a Z-up to Y-up
+     matrix — so rather than assume an axis, find it: the longest side of
+     the box is the body, and the end with the narrower cross-section is
+     the nose. Proportions are kept; only the frame changes. */
   function normaliseMissile(groups) {
+    var keys = Object.keys(groups), i, j, c, g;
     var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-    var keys = Object.keys(groups), i, c, g;
     for (i = 0; i < keys.length; i++) {
       g = groups[keys[i]];
-      for (var k = 0; k < g.pos.length; k += 3) for (c = 0; c < 3; c++) {
-        lo[c] = Math.min(lo[c], g.pos[k + c]); hi[c] = Math.max(hi[c], g.pos[k + c]);
+      for (j = 0; j < g.pos.length; j += 3) for (c = 0; c < 3; c++) {
+        lo[c] = Math.min(lo[c], g.pos[j + c]); hi[c] = Math.max(hi[c], g.pos[j + c]);
       }
     }
-    var len = hi[1] - lo[1];                       /* the long axis is the model's y */
-    if (!(len > 0)) throw new Error('missile has no length');
     var mid = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+    var span = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+    var axis = span[0] > span[1] ? (span[0] > span[2] ? 0 : 2) : (span[1] > span[2] ? 1 : 2);
+    var len = span[axis];
+    if (!(len > 0)) throw new Error('model has no length');
+    var a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
+
+    /* how fat it is near each end, to tell the nose from the tail */
+    var near = [0, 0], count = [0, 0], cut = len * 0.16;
+    for (i = 0; i < keys.length; i++) {
+      g = groups[keys[i]];
+      for (j = 0; j < g.pos.length; j += 3) {
+        var along = g.pos[j + axis] - mid[axis];
+        var end = along < -len / 2 + cut ? 0 : along > len / 2 - cut ? 1 : -1;
+        if (end < 0) continue;
+        near[end] = Math.max(near[end],
+          Math.hypot(g.pos[j + a1] - mid[a1], g.pos[j + a2] - mid[a2]));
+        count[end]++;
+      }
+    }
+    /* the fins are the widest thing on it, so the narrow end is the nose */
+    var noseAtHigh = count[1] && count[0] ? near[1] < near[0] : true;
+
+    /* an orthonormal frame with +z down the body toward the nose */
+    var f = [0, 0, 0]; f[axis] = noseAtHigh ? 1 : -1;
+    var up = Math.abs(f[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1];
+    var r = [up[1] * f[2] - up[2] * f[1], up[2] * f[0] - up[0] * f[2], up[0] * f[1] - up[1] * f[0]];
+    var rl = Math.hypot(r[0], r[1], r[2]) || 1;
+    r = [r[0] / rl, r[1] / rl, r[2] / rl];
+    var u2 = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]];
+
     var out = [];
     for (i = 0; i < keys.length; i++) {
       g = groups[keys[i]];
       var pos = new Float32Array(g.pos.length), nrm = new Float32Array(g.nrm.length);
-      for (var j = 0; j < g.pos.length; j += 3) {
-        pos[j] = (g.pos[j] - mid[0]) / len;                    /* model x → x */
-        pos[j + 1] = (g.pos[j + 2] - mid[2]) / len;            /* model z → y */
-        pos[j + 2] = -(g.pos[j + 1] - mid[1]) / len;           /* model −y → z, nose forward */
-        nrm[j] = g.nrm[j];
-        nrm[j + 1] = g.nrm[j + 2];
-        nrm[j + 2] = -g.nrm[j + 1];
+      for (j = 0; j < g.pos.length; j += 3) {
+        var px = g.pos[j] - mid[0], py = g.pos[j + 1] - mid[1], pz = g.pos[j + 2] - mid[2];
+        pos[j] = (px * r[0] + py * r[1] + pz * r[2]) / len;
+        pos[j + 1] = (px * u2[0] + py * u2[1] + pz * u2[2]) / len;
+        pos[j + 2] = (px * f[0] + py * f[1] + pz * f[2]) / len;
+        var nx = g.nrm[j], ny = g.nrm[j + 1], nz = g.nrm[j + 2];
+        nrm[j] = nx * r[0] + ny * r[1] + nz * r[2];
+        nrm[j + 1] = nx * u2[0] + ny * u2[1] + nz * u2[2];
+        nrm[j + 2] = nx * f[0] + ny * f[1] + nz * f[2];
       }
       out.push({ pos: pos, nrm: nrm, colour: new Float32Array(g.colour) });
     }
@@ -3866,6 +3972,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
   function endFlight() {
     flight.active = false;
+    setDoors(false);            /* shut again, ready for the next one */
     flight.playing = false;
     if (flight.raf) cancelAnimationFrame(flight.raf);
     flight.raf = null;
@@ -4975,6 +5082,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       });
       /* The destination list is only worth drawing when it is on show. */
       if (b.dataset.pane === 'p-target') showDestination();
+      stationView(b.dataset.pane);
       /* Bring the station's own contents up under the rail rather than
          jumping to the very bottom of everything. */
       var sc = $('conscroll'), dk = $('deck'), st = $('stations');
