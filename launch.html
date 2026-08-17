@@ -2795,7 +2795,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     for (var i = 0; i < METEORS; i++) {
       var f = 0.06 + rnd() * 0.86;
       var tm = f * sol.dur;
-      var st = sampleAt(sol.flight.samples, tm);
+      var st = sampleFromList(sol.flight.samples, tm);
       if (!st || st.alt < 55000) continue;               /* rocks burn up low */
       var v = METEOR_V[0] + rnd() * (METEOR_V[1] - METEOR_V[0]);
       /* a direction with a downward bias, as an arriving rock has */
@@ -2826,8 +2826,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return out;
   }
 
-  /* The nearest sample either side of a time, interpolated. */
-  function sampleAt(list, t) {
+  /* The nearest sample either side of a time, interpolated. Named for the
+     list it reads, because the flight has a sampleAt of its own. */
+  function sampleFromList(list, t) {
     if (!list || !list.length) return null;
     var lo = 0, hi = list.length - 1;
     if (t <= list[0].t) return list[0];
