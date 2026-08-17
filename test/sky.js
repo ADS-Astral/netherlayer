@@ -65,14 +65,16 @@ const PAD = [132.7394349, -23.0788817];
   await p.evaluate(() => { const e = document.getElementById('rate'); e.value = '150'; e.dispatchEvent(new Event('input')); });
   await p.waitForTimeout(1000);
 
-  const GROUND2 = 0;
-  for (const [name, at] of [['K-early', 20], ['K-high', 120]]) {
+  await p.evaluate(() => { const b = [...document.querySelectorAll('.cams button')].find(x => x.textContent.trim().startsWith('Chase')); if (b) b.click(); });
+  await p.waitForTimeout(2000);
+  /* early scrubs sit at airliner height; later ones are rock country */
+  for (const [name, at] of [['K-air2', 2], ['K-air4', 4], ['K-rock40', 40],
+                            ['K-rock120', 120], ['K-rock300', 300]]) {
     await p.evaluate(v => { const e = document.getElementById('scrub'); e.value = String(v); e.dispatchEvent(new Event('input')); }, at);
-    await p.waitForTimeout(6000);
+    await p.waitForTimeout(5500);
     await shot({ path: OUT + name + '.png' });
-    console.log('shot', name, '·', (await p.textContent('#hud')).replace(/\s+/g,' ').trim().slice(0, 64));
+    console.log('shot', name, '·', (await p.textContent('#hud')).replace(/\s+/g,' ').trim().slice(0, 52));
   }
-  void GROUND2;
 
   console.log('\n' + (errs.length ? errs.slice(0,4).join('\n') : 'no js errors'));
   await browser.close(); done();
