@@ -2018,8 +2018,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      ════════════════════════════════════════════════════════════ */
   var TOWER_F = 0.5;       /* farads in one tank */
   var TOWER_W = 2.2, TOWER_H = 6.4, TOWER_PITCH = 3.4;   /* the stand-in can */
-  var SEGMENT_M = 10;      /* a shipped length of rail */
-  var MAX_TOWERS = 260, MAX_SEGMENTS = 220;
+  var SEGMENT_M = 10;      /* a shipped length of rail, for the reckoning */
+  var MAX_TOWERS = 260;
 
   /* The colours the hand-built parts are drawn in. The models carry their
      own, baked off their textures when they were prepared. */
@@ -2048,7 +2048,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   var site3d = {
     wanted: false, ready: false, failed: null,
     THREE: null, renderer: null, scene: null, camera: null,
-    root: null, hangar: null, tanks: [], mixers: [],
+    root: null, hangar: null, tanks: [], rail: null, mixers: [],
     tankBox: null, hangarBox: null, gateX: 0
   };
 
@@ -2085,7 +2085,19 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         var one = function (url) {
           return new Promise(function (res, rej) { loader.load(url, res, null, rej); });
         };
-        return Promise.all([one(MODEL_URL.hangar), one(MODEL_URL.tank)])
+        var bad = function (what) {
+          return function (e) {
+            if (window.console && console.warn) {
+              console.warn('Launch site models: the ' + what + ' would not load (' +
+                           ((e && e.message) || e) + '); the rest of the site still stands.');
+            }
+            return null;
+          };
+        };
+        /* The rail needs three.js and nothing else, so a model that will
+           not arrive costs its own shape and no more. */
+        return Promise.all([one(MODEL_URL.hangar).catch(bad('hangar')),
+                            one(MODEL_URL.tank).catch(bad('tank'))])
           .then(function (g) { buildSiteScene(THREE, g[0], g[1]); });
       })
       .catch(function (e) {
@@ -2106,55 +2118,58 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
        Its gate plane goes on the pad origin, so the rail starts in the
        open doorway and rises away without ever crossing the building,
        and the floor inside goes to ground level. */
-    var hangar = hangarGltf.scene;
-    hangar.updateWorldMatrix(true, true);
-    var facade = hangar.getObjectByName('facade');
-    var slab = hangar.getObjectByName('foundation');
-    var gateZ = facade ? new THREE.Box3().setFromObject(facade).getCenter(new THREE.Vector3()).z : 0;
-    var floorY = slab ? new THREE.Box3().setFromObject(slab).max.y : 0;
+    var hangar = hangarGltf && hangarGltf.scene;
+    if (hangar) {
+      hangar.updateWorldMatrix(true, true);
+      var facade = hangar.getObjectByName('facade');
+      var slab = hangar.getObjectByName('foundation');
+      var gateZ = facade ? new THREE.Box3().setFromObject(facade).getCenter(new THREE.Vector3()).z : 0;
+      var floorY = slab ? new THREE.Box3().setFromObject(slab).max.y : 0;
 
-    var hg = new THREE.Group();
-    hg.add(hangar);
-    hg.applyMatrix4(siteFrame(THREE, 'hangar'));
-    hg.position.set(-gateZ, 0, -floorY);
-    hg.updateMatrixWorld(true);
-    scene.add(hg);
-    site3d.hangar = hg;
-    site3d.hangarBox = new THREE.Box3().setFromObject(hg);
-
-    /* The gate starts shut. Visiting the rails opens it — both leaves
-       swing about ninety degrees, which clears the whole seven metres of
-       the aperture — and it stays open until the flight is over. */
-    if (hangarGltf.animations && hangarGltf.animations.length) {
-      /* The clips are scrubbed, not played, so they must never reach the
-         state three.js calls finished — a clamped LoopOnce action stops
-         being posed at all, and the leaves freeze wherever they stopped. */
-      var mixer = new THREE.AnimationMixer(hangar);
-      hangarGltf.animations.forEach(function (clip) {
-        var act = mixer.clipAction(clip);
-        act.clampWhenFinished = false;
-        act.loop = THREE.LoopRepeat;
-        act.play();
-      });
-      var swing = hangarGltf.animations[0].duration * 0.999;
-      site3d.doors = { mixer: mixer, dur: swing, at: 0, want: 0 };
-      /* open, the leaves stand outside the wall, so the box is measured
-         with the gate at its widest rather than at rest */
-      mixer.setTime(swing);
+      var hg = new THREE.Group();
+      hg.add(hangar);
+      hg.applyMatrix4(siteFrame(THREE, 'hangar'));
+      hg.position.set(-gateZ, 0, -floorY);
+      hg.updateMatrixWorld(true);
+      scene.add(hg);
+      site3d.hangar = hg;
       site3d.hangarBox = new THREE.Box3().setFromObject(hg);
-      mixer.setTime(0);
+
+      /* The gate starts shut. Visiting the rails opens it — both leaves
+         swing about ninety degrees, which clears the whole seven metres of
+         the aperture — and it stays open until the flight is over.
+         The clips are scrubbed, not played, so they must never reach the
+         state three.js calls finished: a clamped LoopOnce action stops
+         being posed at all, and the leaves freeze wherever they stopped. */
+      if (hangarGltf.animations && hangarGltf.animations.length) {
+        var mixer = new THREE.AnimationMixer(hangar);
+        hangarGltf.animations.forEach(function (clip) {
+          var act = mixer.clipAction(clip);
+          act.clampWhenFinished = false;
+          act.loop = THREE.LoopRepeat;
+          act.play();
+        });
+        var swing = hangarGltf.animations[0].duration * 0.999;
+        site3d.doors = { mixer: mixer, dur: swing, at: 0, want: 0 };
+        /* open, the leaves stand outside the wall, so the box is measured
+           with the gate at its widest rather than at rest */
+        mixer.setTime(swing);
+        site3d.hangarBox = new THREE.Box3().setFromObject(hg);
+        mixer.setTime(0);
+      }
     }
 
     /* ── the tanks, as one instanced draw however many there are ── */
     var tg = new THREE.Group();
-    tg.add(tankGltf.scene);
+    if (tankGltf) tg.add(tankGltf.scene);
     tg.applyMatrix4(siteFrame(THREE, 'tank'));
     tg.updateMatrixWorld(true);
     var tb = new THREE.Box3().setFromObject(tg);
     var mid = tb.getCenter(new THREE.Vector3());
+    if (!tankGltf) { tb = null; }
     /* centred across and along, standing on the ground */
     var settle = new THREE.Matrix4().makeTranslation(-mid.x, -mid.y, -tb.min.z);
-    site3d.tankBox = tb.clone().applyMatrix4(settle);
+    site3d.tankBox = tb ? tb.clone().applyMatrix4(settle) : null;
 
     site3d.tanks = [];
     tg.updateWorldMatrix(true, true);
@@ -2182,6 +2197,25 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var fill = new THREE.DirectionalLight(0x9fb4d8, 0.8);
     fill.position.set(0.8, -0.7, 0.35);
     scene.add(fill);
+
+    /* ── the rail ──────────────────────────────────────────────────
+       Two rectangles and the bed they sit on, held at unit size and
+       given their shape by the console: length along the shot, the bore
+       gap between them, the rail height through them, and the whole lot
+       turned to the elevation the launcher is set to. */
+    var railGroup = new THREE.Group();
+    var copper = new THREE.MeshStandardMaterial({ color: 0xc07a3a, metalness: 0.85, roughness: 0.38 });
+    var steel = new THREE.MeshStandardMaterial({ color: 0x6d7280, metalness: 0.45, roughness: 0.72 });
+    var unit = new THREE.BoxGeometry(1, 1, 1);
+    site3d.rail = {
+      group: railGroup,
+      left: new THREE.Mesh(unit, copper),
+      right: new THREE.Mesh(unit, copper),
+      bed: new THREE.Mesh(unit, steel)
+    };
+    railGroup.add(site3d.rail.bed, site3d.rail.left, site3d.rail.right);
+    railGroup.traverse(function (o) { o.frustumCulled = false; });
+    scene.add(railGroup);
 
     site3d.scene = scene;
     site3d.camera = new THREE.Camera();
@@ -2325,6 +2359,22 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       0, 0, s, mc.z,
       0, 0, 0, 1);
 
+    /* the rail: unit boxes, scaled and turned by what the console says */
+    var r = site3d.rail;
+    if (r) {
+      var len = Math.max(1, cfg.railLen), gap = Math.max(0.02, cfg.gap);
+      var high = Math.max(0.02, cfg.railH), barW = Math.max(0.06, gap / 4);
+      r.left.scale.set(len, barW, high);
+      r.left.position.set(len / 2, gap / 2 + barW / 2, 0);
+      r.right.scale.set(len, barW, high);
+      r.right.position.set(len / 2, -(gap / 2 + barW / 2), 0);
+      r.bed.scale.set(len, gap + barW * 2 + 0.5, 0.34);
+      r.bed.position.set(len / 2, 0, -high / 2 - 0.17);
+      /* +x tilts up toward +z, which is a turn about −y */
+      r.group.rotation.y = -cfg.angle * D2R;
+      r.group.updateMatrixWorld(true);
+    }
+
     var mtx = new THREE.Matrix4();
     for (var t = 0; t < site3d.tanks.length; t++) {
       var inst = site3d.tanks[t];
@@ -2386,26 +2436,6 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       }
     }
 
-    /* ── the rail, laid a section at a time ── */
-    var el = cfg.angle * D2R, ce = Math.cos(el), se = Math.sin(el);
-    var segLen = SEGMENT_M;
-    var nSeg = Math.ceil(cfg.railLen / segLen);
-    if (nSeg > MAX_SEGMENTS) { nSeg = MAX_SEGMENTS; segLen = cfg.railLen / nSeg; }
-    var halfGap = cfg.gap / 2, barW = Math.max(0.06, cfg.gap / 4), barH = cfg.railH / 2;
-    for (var s2 = 0; s2 < nSeg; s2++) {
-      var d0 = s2 * segLen, dm = d0 + segLen * 0.5;
-      var joint = segLen * 0.06;                      /* a visible break */
-      var half = (segLen - joint) / 2;
-      var cx = dm * ce, cz = dm * se;
-      box(cx, halfGap + barW, cz, half, barW, barH, el, 0);
-      box(cx, -halfGap - barW, cz, half, barW, barH, el, 0);
-      /* the bed the pair sits on, and a leg down to the ground */
-      box(cx, 0, cz - barH - 0.35, half, halfGap + barW * 2, 0.3, el, 1);
-      if (cz > 1.2) {
-        box(cx, 0, (cz - barH - 0.5) / 2, half * 0.16, halfGap * 0.8,
-            (cz - barH - 0.5) / 2, 0, 1);
-      }
-    }
     /* ── the bank ──
        One tank per half farad, lying on the ground in a yard behind the
        hangar. The yard is set out here whether or not the models are up,
@@ -2427,7 +2457,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return {
       merc: new Float32Array(merc), globe: new Float32Array(globe),
       look: new Float32Array(look), count: look.length / 4,
-      tanks: lay.n, segments: nSeg, segLen: segLen
+      tanks: lay.n
     };
   }
 
