@@ -24,6 +24,8 @@ in `test/.cache/` and `test/*.png`, both ignored by git.
 | `order.js` | the station rail reads in the right order at four widths, and every key opens its own pane |
 | `mobile.js` | portrait at five sizes: nothing overlaps, nothing spills sideways, closed and open and counting and flying |
 | `missile.js` | the round is the missile model: fires, scrubs into flight, shoots it from behind and from the side |
+| `rail.js` | the rail is three.js boxes: length, bore gap, rail height and elevation each visibly shape it |
+| `impact.js` | whether the round lands on the terrain under it or on a flat sea level |
 | `three-site.js` | the hangar and tank models load and the model layer goes up; takes screenshots of the site |
 | `fallback-models.js` | with three.js and both models blocked, the site still stands, still solves, still fires |
 
@@ -50,8 +52,8 @@ navigating — fetching a megabyte while the page is already booting loses the
 race and the loader never clears.
 
 Typical times on the CPU rasteriser: `fallback` 60 s, `three-site` 125 s,
-`dest` 140 s, `missile` 180 s, `order` 240 s, `flight` 300 s, `console` 325 s,
-`mobile` 425 s.
+`dest` 140 s, `missile` 180 s, `rail` 210 s, `impact` 230 s, `order` 240 s,
+`flight` 300 s, `console` 325 s, `mobile` 425 s.
 
 `missile.js` is the odd one out: it is judged by eye, not by values, so it runs
 at a larger viewport and hides the console before each shot. Everything else
