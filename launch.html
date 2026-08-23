@@ -85,6 +85,32 @@ body.flying #panel { max-height: calc(100% - 210px); }
 #lamp.no { background: var(--red); box-shadow: 0 0 9px var(--red), 0 0 0 3px rgba(231,76,60,.16); }
 #lamp.wait { background: var(--accent); box-shadow: 0 0 9px var(--accent), 0 0 0 3px rgba(230,126,34,.16); }
 #conhead #flag { flex: 1; }
+#vault {
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+  gap: 0 8px; padding: 9px 13px 8px;
+  background: linear-gradient(180deg, rgba(30,26,10,.92), rgba(14,14,28,.92));
+  border-bottom: 1px solid rgba(212,175,55,.24);
+}
+#vault .vlabel {
+  grid-column: 1; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700;
+}
+#vault b {
+  grid-column: 1; grid-row: 2; font-size: 21px; font-weight: 700;
+  color: var(--gold2); letter-spacing: .01em; line-height: 1.15;
+}
+#vault.broke b { color: var(--red); }
+#vault .vsub {
+  grid-column: 1 / -1; grid-row: 3; font-size: 11px; color: var(--muted);
+  margin-top: 2px; line-height: 1.4;
+}
+#vault-reset {
+  grid-column: 2; grid-row: 1 / span 2; align-self: center;
+  width: 26px; height: 26px; padding: 0; font-size: 14px; line-height: 1;
+  border-radius: 8px; cursor: pointer; color: var(--muted);
+  background: rgba(10,10,22,.7); border: 1px solid rgba(212,175,55,.22);
+}
+#vault-reset:hover { color: var(--gold2); border-color: rgba(212,175,55,.55); }
 #conhead a {
   color: #5c5c88; text-decoration: none; font-size: 15px; line-height: 1;
   padding: 2px 4px; border-radius: 6px;
@@ -608,6 +634,13 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 <!-- ── Launch console ── -->
 <div id="panel" class="nm">
 
+  <div id="vault">
+    <span class="vlabel">The bank</span>
+    <b id="vault-sum">—</b>
+    <button type="button" id="vault-reset" title="Start again with ten billion">↺</button>
+    <span class="vsub" id="vault-sub">&nbsp;</span>
+  </div>
+
   <div id="conhead">
     <span id="lamp"></span>
     <span id="flag">—</span>
@@ -656,6 +689,13 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         <button class="btn" id="trim">◈ Trim the bank to the target</button>
         <p class="hint" id="groundHint">&nbsp;</p>
       </div>
+
+      <div class="seg-h">The contract</div>
+      <div class="knobs">
+        <div class="knob wide" data-bind="margin" data-min="0" data-max="300" data-step="5"
+             data-label="Profit margin" data-unit="%"></div>
+      </div>
+      <p class="hint" id="dealHint">&nbsp;</p>
     </section>
 
     <section class="pane" id="p-round" hidden>
@@ -778,6 +818,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   </select>
   <input type="number" id="alt" value="200" min="0" step="any"/>
   <input type="number" id="range" value="500" min="1" step="1"/>
+  <input type="number" id="margin" value="25" min="0" max="300" step="1"/>
   <input type="number" id="rail" value="1000" min="0" step="any"/>
   <select id="railUnit"><option value="1">m</option><option value="1000">km</option></select>
   <input type="number" id="gap" value="0.5" min="0" step="any"/>
@@ -975,6 +1016,59 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     kWh:         0.14,   /* $/kWh, industrial tariff */
     chargeEff:   0.92    /* how much of what is bought reaches the bank */
   };
+
+  /* ── The bank ──────────────────────────────────────────────────────
+     Ten billion to begin with. The launcher is bought out of it as it
+     stands — turn a dial and the price of the thing you own changes —
+     and every round fired is paid for whether or not it arrives. A
+     delivery pays the cost of the shot plus the margin agreed for it.
+
+     Only the running totals are kept: what has been spent on rounds and
+     what has been earned by them. The launcher's price is not banked,
+     because it is not a payment made once — it is the current value of
+     what is standing on the pad, and it is recomputed from the dials
+     every time they move. */
+  var BANK_START = 1e10;
+  var BANK_KEY = 'netherlayer.bank.v1';
+  var bank = { spent: 0, earned: 0, shots: 0, made: 0 };
+  var lastBill = null;
+
+  function loadBank() {
+    try {
+      var raw = localStorage.getItem(BANK_KEY);
+      if (!raw) return;
+      var got = JSON.parse(raw);
+      ['spent', 'earned', 'shots', 'made'].forEach(function (k) {
+        if (typeof got[k] === 'number' && isFinite(got[k])) bank[k] = got[k];
+      });
+    } catch (e) { /* a browser that will not remember is not a reason to stop */ }
+  }
+  function saveBank() {
+    try { localStorage.setItem(BANK_KEY, JSON.stringify(bank)); } catch (e) {}
+  }
+  function bankBuilt() { return lastBill ? lastBill.build : 0; }
+  function bankBalance() { return BANK_START - bankBuilt() - bank.spent + bank.earned; }
+  function marginPct() {
+    var m = parseFloat($('margin').value);
+    return isFinite(m) && m >= 0 ? m : 0;
+  }
+  /* What a delivery is worth: the round's own cost, plus the margin. */
+  function payoutFor(perShot) { return perShot * (1 + marginPct() / 100); }
+
+  function renderBank() {
+    var left = bankBalance(), built = bankBuilt();
+    $('vault-sum').innerHTML = money(left);
+    $('vault').classList.toggle('broke', left < 0);
+    var net = bank.earned - bank.spent;
+    var bits = [];
+    bits.push(built > 0 ? 'launcher ' + money(built) : 'nothing built yet');
+    if (bank.shots) {
+      bits.push(bank.made + ' of ' + bank.shots + ' delivered');
+      bits.push((net >= 0 ? '+' : '−') + money(Math.abs(net)) + ' on the rounds');
+    }
+    if (left < 0) bits.push('over the limit — this launcher cannot be paid for');
+    $('vault-sub').innerHTML = bits.join(' · ');
+  }
 
   /* Everything the shot costs, and the sum a line at a time. */
   function costOf(p) {
@@ -3684,6 +3778,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
        either way — so it is drawn as soon as the rails have been fired. */
     var bill = costOf({ railLen: railLen, gap: gap, railH: railH, cap: cap, v0: v0,
                         bankE: bankE, peakI: shot.peakI, capJPrice: capT.jprice });
+    /* The launcher is bought as it stands, so the bank follows the dials. */
+    lastBill = bill;
+    renderBank();
+    renderDeal(bill);
     renderCost(bill,
       'A farad costs ' + rate(bill.perFarad) + ' at ' + sig(v0 / 1000, 3) +
       ' kV: a bank is really bought by the joule — ' + rate(capT.jprice) +
@@ -3860,9 +3958,26 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         'still supply <b>' + sig(dv, 4) + ' m/s</b> — no ballistic shot closes its own orbit.');
     }
 
+    /* The verdict is on the board by now, so the contract can be priced:
+       a delivery is a shot the console calls good. */
+    solution.delivered = $('flag').className === 'yes';
+    solution.shotCost = bill.perShot;
+    solution.pay = solution.delivered ? payoutFor(bill.perShot) : 0;
+
     drawChart();
     renderAimChip();
-    $('fire').disabled = false;
+    /* A launcher the bank cannot cover does not get to fire. The dials
+       that made it this expensive will make it cheaper again. */
+    var afford = bankBalance() - bill.perShot;
+    if (afford < 0) {
+      $('fire').disabled = true;
+      verdict('no', 'THE BANK CANNOT COVER IT',
+        'This launcher costs <b>' + money(bill.build) + '</b> to build and the bank holds <b>' +
+        money(BANK_START - bank.spent + bank.earned) + '</b>. Shorter rails, a smaller bore or ' +
+        'fewer farads — the capacitors are usually the bulk of it.');
+    } else {
+      $('fire').disabled = false;
+    }
     map.triggerRepaint();
   }
 
@@ -3979,6 +4094,28 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     };
   }
 
+  /* What this shot is worth if it arrives, and what the margin has to
+     carry. The build dwarfs the round by six orders of magnitude, so the
+     number of deliveries it takes to pay the launcher off is the honest
+     headline rather than a footnote. */
+  function renderDeal(bill) {
+    var el = $('dealHint');
+    if (!el) return;
+    if (!bill) { el.innerHTML = '&nbsp;'; return; }
+    var pay = payoutFor(bill.perShot), profit = pay - bill.perShot;
+    var out = 'A delivery pays <b>' + money(pay) + '</b> against ' + money(bill.perShot) +
+              ' of round and power — <b>' + money(profit) + '</b> of it profit.';
+    if (profit > 0 && bill.build > 0) {
+      var n = bill.build / profit;
+      out += ' At that rate the launcher pays for itself after <b>' +
+             (n >= 1e6 ? sig(n / 1e6, 3) + ' million' : n >= 1e3 ? sig(n / 1e3, 3) + ' thousand'
+              : String(Math.ceil(n))) + '</b> of them.';
+    } else if (profit <= 0) {
+      out += ' At no margin every round is flown at cost.';
+    }
+    el.innerHTML = out;
+  }
+
   /* ─── The bill ─── */
   function renderCost(bill, note) {
     if (!bill) {
@@ -4063,7 +4200,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   var flight = {
     active: false, t: 0, rate: 1, playing: false, cam: 'chase',
     raf: null, last: 0, struck: false, launchAt: 0, willHit: null,
-    space: false, spaceBlend: 0,
+    space: false, spaceBlend: 0, settled: true,
     orbit: { az: 150, el: 22, dist: 900 }
   };
 
@@ -4354,6 +4491,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       if (flight.t >= solution.dur) {
         flight.t = solution.dur;
         flight.playing = false;
+        settleLaunch();
         $('playpause').textContent = '▶ Replay';
         var end = solution.flight.reached ? 'Target altitude reached.' :
           (solution.flight.impact !== null ? 'Back on the ground after ' + secs(solution.dur) + '.' :
@@ -4436,6 +4574,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   }
 
   function endFlight() {
+    settleLaunch();               /* leaving early does not unfire it */
     flight.active = false;
     setDoors(false);            /* shut again, ready for the next one */
     if (chuteForced !== null) { chuteForced = null; solve(); }
@@ -4916,6 +5055,29 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   /* The second the shot actually goes decides what it meets up there.
      Both ways out of the count come through here — running it down and
      skipping it — so a skipped count is as dangerous as a patient one. */
+  /* One launch, one entry. The round is paid for the moment it goes;
+     what it earns is settled when it comes down, which is the only
+     moment anyone knows whether it arrived. */
+  function chargeShot() {
+    bank.spent += solution ? solution.shotCost : 0;
+    bank.shots += 1;
+    flight.settled = false;
+    saveBank();
+    renderBank();
+  }
+  function settleLaunch() {
+    if (flight.settled) return;
+    flight.settled = true;
+    if (solution && solution.delivered) {
+      bank.earned += solution.pay;
+      bank.made += 1;
+      toast('Delivered. ' + money(solution.pay) + ' into the bank — ' +
+            money(solution.pay - solution.shotCost) + ' of it profit.', 5000);
+    }
+    saveBank();
+    renderBank();
+  }
+
   function commitLaunch() {
     flight.launchAt = (performance.now() - countdown.t0) / 1000;
     flight.willHit = trafficRisk(flight.launchAt);
@@ -4926,6 +5088,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       solve();
       armCrashClip();               /* already under way; harmless twice */
     }
+    /* Priced after the re-solve, so a shot that is about to meet an
+       airliner is already known not to be a delivery. */
+    chargeShot();
   }
 
   function lngLatToTile(lng, lat, z) {
@@ -5633,7 +5798,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   });
   $('alt').addEventListener('input', function () { $('dest').value = '0'; solve(); });
   ['mPay','mPayUnit','mSabot','dPay','shape','angle','rail','railUnit','gap','railH',
-   'capType','cap','capUnit','volt','voltUnit','res','resUnit','ind'].forEach(function (id) {
+   'capType','cap','capUnit','volt','voltUnit','res','resUnit','ind','margin'].forEach(function (id) {
     $(id).addEventListener('input', solve);
     $(id).addEventListener('change', solve);
   });
@@ -5652,6 +5817,13 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     map.triggerRepaint();
   });
   $('showchute').addEventListener('change', solve);
+  $('vault-reset').addEventListener('click', function () {
+    bank = { spent: 0, earned: 0, shots: 0, made: 0 };
+    saveBank();
+    renderBank();
+    toast('The bank is back to ' + money(BANK_START) + '. The launcher still costs what it costs.', 4500);
+    solve();
+  });
   $('mission').addEventListener('change', function () {
     if ($('mission').value === 'ground') {
       /* A terrestrial shot needs somewhere to go, so give it the nearest
@@ -5759,6 +5931,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   $('mPayUnit').value = '1';         /* microhms, so the units */
   $('resUnit').value = '0.000001';   /* stay off the panel */
   recomputeBank();
+  loadBank();                        /* what previous launches left in it */
+  renderBank();
   refreshControls();
   reflowCards();
   fadeFoot();

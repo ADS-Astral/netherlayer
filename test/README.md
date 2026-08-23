@@ -27,6 +27,7 @@ in `test/.cache/` and `test/*.png`, both ignored by git.
 | `rail.js` | the rail is three.js boxes: length, bore gap, rail height and elevation each visibly shape it |
 | `impact.js` | whether the round lands on the terrain under it or on a flat sea level |
 | `traffic.js` | one to ten crossing flights per destination, the count on screen, and the risk line by the second |
+| `bank.js` | the treasury: ten billion less the launcher, a round charged per launch, a delivery paid at the agreed margin, and the ledger surviving a reload |
 | `crash.js` | a mid-air: the clip is fetched during the count, plays on the collision, and the round comes down under canopy where it happened |
 | `three-site.js` | the hangar and tank models load and the model layer goes up; takes screenshots of the site |
 | `fallback-models.js` | with three.js and both models blocked, the site still stands, still solves, still fires |
@@ -76,7 +77,7 @@ race and the loader never clears.
 
 Typical times on the CPU rasteriser: `fallback` 60 s, `three-site` 125 s,
 `dest` 140 s, `missile` 180 s, `rail` 210 s, `impact` 230 s, `order` 240 s,
-`traffic` 260 s, `crash` 300 s, `flight` 300 s, `console` 325 s, `mobile` 425 s.
+`traffic` 260 s, `bank` 280 s, `crash` 300 s, `flight` 300 s, `console` 325 s, `mobile` 425 s.
 
 `missile.js` is the odd one out: it is judged by eye, not by values, so it runs
 at a larger viewport and hides the console before each shot. Everything else
