@@ -1,4 +1,5 @@
-/* The rail is three.js boxes now: do the console inputs actually shape it? */
+/* Flights that cross the shot: chosen at the destination, laid out at the
+   count, and reported second by second. */
 const PLAYWRIGHT = process.env.PLAYWRIGHT_MODULE || '/opt/node22/lib/node_modules/playwright';
 const CHROME = process.env.CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const { chromium } = require(PLAYWRIGHT);
@@ -13,12 +14,11 @@ const BUDGET = Number(process.env.BUDGET || 480) * 1000;
 const T0 = Date.now(); let BROWSER = null;
 const WATCHDOG = setTimeout(() => { console.log('\n!! watchdog after ' + Math.round((Date.now()-T0)/1000) + 's'); setTimeout(()=>process.exit(2),4000).unref(); if (BROWSER) BROWSER.close().then(()=>process.exit(2),()=>process.exit(2)); else process.exit(2); }, BUDGET);
 const done = () => clearTimeout(WATCHDOG);
-const PAD = [132.7394349, -23.0788817];
 
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--no-sandbox'] });
   BROWSER = browser;
-  const p = await (await browser.newContext({ viewport: { width: 900, height: 600 } })).newPage();
+  const p = await (await browser.newContext({ viewport: { width: 1000, height: 700 } })).newPage();
   p.setDefaultTimeout(90000);
   const shot = (o) => p.screenshot(o).catch(e => console.log('!! shot skipped: ' + String(e.message).split('\n')[0]));
   const errs = []; p.on('pageerror', e => errs.push('ERR ' + e.message.slice(0, 200)));
@@ -36,50 +36,54 @@ const PAD = [132.7394349, -23.0788817];
   await p.waitForFunction(() => document.getElementById('loader').classList.contains('gone'), { timeout: 120000 }).catch(()=>console.log('!! loader stuck'));
   await p.waitForTimeout(9000);
   await p.evaluate(() => { const e = document.getElementById('sharpness'); if (e) { e.value='soft'; e.dispatchEvent(new Event('change')); } });
-  await p.waitForFunction(() => !!window.netherlayerRange.getLayer('site-models'), { timeout: 240000 }).catch(()=>console.log('!! site models never arrived'));
-  await p.waitForTimeout(5000);
+  await p.evaluate(() => { const c = document.getElementById('showsite'); if (c && c.checked) { c.checked=false; c.dispatchEvent(new Event('change')); } });
+  await p.evaluate(() => { const c = document.getElementById('showbuildings'); if (c && c.checked) { c.checked=false; c.dispatchEvent(new Event('change')); } });
+  await p.waitForTimeout(3000);
 
-  const set = async (id, v) => { await p.evaluate(([i,x]) => { const e = document.getElementById(i); e.value = String(x); e.dispatchEvent(new Event('input')); }, [id, v]); await p.waitForTimeout(3000); };
-  const view = async (name, up, zoom, bearing, pitch) => {
-    await p.evaluate(([c,g,u,z,b,t]) => window.netherlayerRange.jumpTo({ center: c, zoom: z, pitch: t, bearing: b, elevation: g + u }),
-      [PAD, GROUND, up, zoom, bearing, pitch]);
-    await p.waitForTimeout(7000);
-    await shot({ path: OUT + name + '.png' });
-    console.log('shot', name);
-  };
-  const GROUND = await p.evaluate(c => { const h = window.netherlayerRange.queryTerrainElevation({lng:c[0],lat:c[1]}); return (h===null||h===undefined||!isFinite(h))?0:h; }, PAD);
+  /* terrestrial, and pick a destination — which is what rolls the count */
+  await p.evaluate(() => document.querySelector('[data-pane="p-target"]').click());
+  await p.waitForTimeout(600);
+  await p.evaluate(() => [...document.querySelectorAll('.seg[data-bind="mission"] button')].find(b=>/Terrestrial/.test(b.textContent)).click());
+  await p.waitForTimeout(4000);
 
-  /* How many routes and rocks does a shot get, and does a strike happen? */
-  const sky = () => p.evaluate(() => {
-    const w = window.netherlayerRange;
-    const src = w.getSource('airways');
-    let inSource = -1;
-    try { const ser = src && src.serialize && src.serialize(); inSource = ser && ser.data && ser.data.features ? ser.data.features.length : -1; } catch (e) {}
-    let drawn = -1;
-    try { drawn = w.querySourceFeatures('airways').length; } catch (e) {}
-    let painted = -1;
-    try { painted = w.queryRenderedFeatures({ layers: ['airway-line'] }).length; } catch (e) {}
-    return { inSource, drawn, painted, hasLayer: !!w.getLayer('airway-line') };
-  });
-  console.log('airway lines on the map:', JSON.stringify(await sky()));
-
-  await p.evaluate(() => document.getElementById('fire').click());
-  await p.waitForTimeout(1500);
-  await p.evaluate(() => { const b = document.getElementById('cd-skip'); if (b) b.click(); });
-  await p.waitForTimeout(6000);
-  await p.evaluate(() => { const e = document.getElementById('rate'); e.value = '150'; e.dispatchEvent(new Event('input')); });
-  await p.waitForTimeout(1000);
-
-  await p.evaluate(() => { const b = [...document.querySelectorAll('.cams button')].find(x => x.textContent.trim().startsWith('Chase')); if (b) b.click(); });
-  await p.waitForTimeout(2000);
-  /* early scrubs sit at airliner height; later ones are rock country */
-  for (const [name, at] of [['K-air2', 2], ['K-air4', 4], ['K-rock40', 40],
-                            ['K-rock120', 120], ['K-rock300', 300]]) {
-    await p.evaluate(v => { const e = document.getElementById('scrub'); e.value = String(v); e.dispatchEvent(new Event('input')); }, at);
-    await p.waitForTimeout(5500);
-    await shot({ path: OUT + name + '.png' });
-    console.log('shot', name, '·', (await p.textContent('#hud')).replace(/\s+/g,' ').trim().slice(0, 52));
+  const counts = [];
+  for (const name of ['perth', 'sydney', 'brisbane', 'melbourne', 'adelaide', 'auckland']) {
+    await p.evaluate(n => { const e = document.getElementById('citysearch'); e.value = n; e.dispatchEvent(new Event('input')); }, name);
+    await p.waitForTimeout(500);
+    await p.evaluate(() => { const r = document.querySelector('#citylist .cityrow'); if (r) r.click(); });
+    await p.waitForTimeout(2600);
+    /* the count is not on screen until the countdown, so fire and read it */
+    await p.evaluate(() => document.getElementById('fire').click());
+    await p.waitForTimeout(2200);
+    const seen = await p.evaluate(() => ({
+      shown: !document.getElementById('cd-traffic').hidden,
+      cross: document.getElementById('cd-cross').textContent,
+      risk: document.getElementById('cd-risk').textContent,
+      routes: (() => { try { return window.netherlayerRange.querySourceFeatures('airways').length; } catch (e) { return -1; } })()
+    }));
+    counts.push(seen);
+    console.log(('after ' + name).padEnd(18), JSON.stringify(seen));
+    if (counts.length === 1) await shot({ path: OUT + 'F-count.png' });
+    /* watch the risk line flip as the seconds pass */
+    if (counts.length === 1) {
+      const seq = [];
+      for (let k = 0; k < 7; k++) {
+        await p.waitForTimeout(1000);
+        seq.push(await p.evaluate(() => document.getElementById('cd-risk').textContent.slice(0, 18)));
+      }
+      console.log('  risk line by second:', JSON.stringify(seq));
+    }
+    await p.evaluate(() => { const b = document.getElementById('cd-skip'); if (b) b.click(); });
+    await p.waitForTimeout(2500);
+    await p.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x=>/Exit flight/.test(x.textContent)); if (b) b.click(); });
+    await p.waitForTimeout(2000);
   }
+
+  const nums = counts.map(c => { const m = /(\d+)/.exec(c.cross); return m ? +m[1] : 0; });
+  console.log('\nflight counts across six destinations:', JSON.stringify(nums));
+  console.log('  all within 1..10:', nums.every(n => n >= 1 && n <= 10));
+  console.log('  they vary       :', new Set(nums).size > 1);
+  console.log('  routes on the map:', JSON.stringify(counts.map(c => c.routes)));
 
   console.log('\n' + (errs.length ? errs.slice(0,4).join('\n') : 'no js errors'));
   await browser.close(); done();

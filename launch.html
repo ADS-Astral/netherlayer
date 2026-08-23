@@ -521,6 +521,17 @@ body.flying #aimchip, body.placing #aimchip { display: none; }
   pointer-events: none;
 }
 #countdown .btn { pointer-events: auto; }
+#cd-traffic {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 8px 16px; margin-bottom: 4px; border-radius: 10px;
+  background: rgba(10,10,22,.72); border: 1px solid rgba(212,175,55,.28);
+}
+#cd-traffic b {
+  font-size: 12.5px; letter-spacing: .06em; color: var(--gold2); font-weight: 700;
+}
+#cd-traffic span { font-size: 11.5px; color: #7fd68a; letter-spacing: .04em; }
+#cd-traffic.hot { border-color: var(--red); background: rgba(60,12,12,.8); }
+#cd-traffic.hot span { color: #ff8a72; font-weight: 700; }
 .cd-num {
   font-size: clamp(64px, 14vw, 150px); font-weight: 700; line-height: 1;
   color: var(--gold2); letter-spacing: .04em;
@@ -840,6 +851,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   <div class="cd-num" id="cd-num">10</div>
   <div class="cd-cap" id="cd-cap">Loading the ground along the flight path</div>
   <div class="cd-bar"><i id="cd-fill"></i></div>
+  <div id="cd-traffic" hidden>
+    <b id="cd-cross">—</b>
+    <span id="cd-risk">—</span>
+  </div>
   <button class="btn" id="cd-skip" style="width:auto;padding:7px 18px">Skip the count</button>
 </div>
 
@@ -2721,8 +2736,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      ════════════════════════════════════════════════════════════ */
 
   var skySeed = 1;
-  var AIRWAYS = 50;
-  var CRUISE_LO = 9500, CRUISE_HI = 12200;     /* m, where airliners live */
+  var CROSS_MIN = 1, CROSS_MAX = 10;           /* flights across one shot */
+  var CROSS_BAND = [7000, 13500];              /* m, where a crossing can bite */
+  var CROSS_HIT = 900;                         /* m, round plus airliner plus nerves */
   var METEORS = 14;                            /* rocks crossing one shot */
   var METEOR_MISS = 1200;                      /* m, how wide they are scattered */
   var METEOR_HIT = 60;                         /* m, round plus rock */
@@ -2738,48 +2754,112 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     };
   }
 
-  /* Fifty real city pairs whose great circle runs near the shot, so the
-     traffic is traffic the round actually passes through rather than
-     decoration somewhere else. */
-  function makeAirways(sol, seed) {
-    if (!pad || !sol || !sol.points || sol.points.length < 2) return [];
-    var rnd = seededRandom(seed);
-    var pts = sol.points;
-    var out = [];
-    var tries = 0;
-    while (out.length < AIRWAYS && tries++ < AIRWAYS * 40) {
+  /* ── Traffic ───────────────────────────────────────────────────────
+     How many flights are in the way is decided when the destination is,
+     and the flights themselves are laid out during the count. Each one
+     is built to cross: a point is taken off the trajectory where the
+     round is at airliner height, and the route is the real city pair
+     whose track passes closest to it. That way every flight drawn is a
+     flight that genuinely crosses the shot, rather than one that might.
+
+     Whether it is hit is then a question about the clock. Each aircraft
+     is over its crossing at a fixed moment; the round is over it at
+     launch plus a fixed run. Launch on the wrong second and they are in
+     the same cubic kilometre — which is what the count is counting. */
+  var airspace = { want: 0, flights: [], seed: 1 };
+
+  function pickTrafficCount() {
+    airspace.seed = (airspace.seed * 1103515245 + 12345) >>> 0;
+    var r = seededRandom(airspace.seed)();
+    airspace.want = CROSS_MIN + Math.floor(r * (CROSS_MAX - CROSS_MIN + 1));
+    airspace.flights = [];
+    return airspace.want;
+  }
+
+  /* The moments the round is at airliner height — once climbing out,
+     once coming back down. */
+  function crossingTimes(sol) {
+    var out = [], s = sol.flight.samples, was = false;
+    for (var i = 0; i < s.length; i++) {
+      var inBand = s[i].alt >= CROSS_BAND[0] && s[i].alt <= CROSS_BAND[1];
+      if (inBand && !was) out.push(s[i].t);
+      was = inBand;
+    }
+    if (!out.length && s.length) out.push(s[Math.floor(s.length / 2)].t);
+    return out;
+  }
+
+  /* The real city pair whose route passes closest to a given place. */
+  function routeAcross(p, rnd) {
+    var best = null, bestOff = Infinity;
+    /* a sample of pairs rather than all forty thousand: the closest of a
+       few hundred is close enough to draw a crossing through */
+    for (var n = 0; n < 400; n++) {
       var a = CITIES[Math.floor(rnd() * CITIES.length)];
       var b = CITIES[Math.floor(rnd() * CITIES.length)];
       if (a === b) continue;
       var sep = groundDistance(a, b);
-      if (sep < 400000 || sep > 11000000) continue;      /* a real sector */
-      /* does it pass anywhere near the ground the shot covers? */
-      var near = Infinity;
-      for (var k = 0; k < pts.length; k += Math.max(1, Math.floor(pts.length / 24))) {
-        near = Math.min(near, Math.abs(offGreatCircle(a, b, pts[k])));
-      }
-      if (near > 900000) continue;
-      out.push({
-        from: a, to: b, sep: sep,
-        alt: CRUISE_LO + rnd() * (CRUISE_HI - CRUISE_LO),
-        speed: 225 + rnd() * 35,
-        at: rnd()                                        /* where along it, at t = 0 */
-      });
+      if (sep < 500000 || sep > 12000000) continue;
+      var off = offRoute(a, b, p);
+      if (off < bestOff) { bestOff = off; best = { from: a, to: b, sep: sep, off: off }; }
     }
-    return out;
+    return best;
   }
 
-  /* Perpendicular distance from a point to the great circle through two
-     others, in metres — signed, but only its size is wanted here. */
-  function offGreatCircle(a, b, p) {
-    var u = unitVec(a), v = unitVec(b), w = unitVec(p);
-    var n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
-    var nl = Math.hypot(n[0], n[1], n[2]) || 1;
-    return Math.asin(Math.max(-1, Math.min(1, (w[0] * n[0] + w[1] * n[1] + w[2] * n[2]) / nl))) * R_E;
+  /* Lay the flights out for this shot. Called when the count starts. */
+  function buildTraffic(sol) {
+    airspace.flights = [];
+    if (!sol || !sol.flight || !sol.flight.samples.length || !airspace.want) return airspace.flights;
+    var rnd = seededRandom(airspace.seed * 2246822519);
+    var times = crossingTimes(sol);
+    for (var i = 0; i < airspace.want; i++) {
+      /* spread the crossings over the moments that have any, jittered so
+         several flights are not stacked on the same second */
+      var tc = times[i % times.length];
+      tc = Math.max(0.4, tc + (rnd() - 0.5) * 6);
+      var st = sampleFromList(sol.flight.samples, tc);
+      if (!st) continue;
+      var g = toGeodetic(st.p, tc);
+      var route = routeAcross(g, rnd);
+      if (!route) continue;
+      /* where along its own route the crossing falls, and when the
+         aircraft is there — a fixed time of its own, not ours */
+      var f = alongRoute(route.from, route.to, g);
+      var speed = 225 + rnd() * 35;
+      var closing = Math.max(200, Math.hypot(st.v[0], st.v[1], st.v[2]));
+      airspace.flights.push({
+        from: route.from, to: route.to, sep: route.sep, off: route.off,
+        at: f, alt: Math.max(CROSS_BAND[0], Math.min(CROSS_BAND[1], g.alt)),
+        speed: speed, tc: tc,
+        /* The round covers the gap at its own speed, not the airliner's:
+           five kilometres a second turns nine hundred metres of room into
+           about a fifth of a second of it. */
+        window: CROSS_HIT / closing,
+        /* When this one is over the crossing, on the same clock as the
+           round: launch on second `a` and the round arrives at a + tc. */
+        over: tc + rnd() * 10,
+        lng: g.lng, lat: g.lat
+      });
+    }
+    return airspace.flights;
   }
-  function unitVec(g) {
-    var la = g.lat * D2R, lo = g.lng * D2R, c = Math.cos(la);
-    return [c * Math.cos(lo), c * Math.sin(lo), Math.sin(la)];
+
+  /* How far along a route a place falls, 0 at one end and 1 at the other. */
+  function alongRoute(a, b, p) {
+    var dAB = groundDistance(a, b) || 1;
+    return Math.max(0, Math.min(1, groundDistance(a, p) / dAB));
+  }
+
+  /* Launching this second, which flights does the round meet? The round
+     is over crossing i at launch + tc; the aircraft is over it at its own
+     fixed moment. Near enough in time is near enough in space. */
+  function trafficRisk(atSecond) {
+    var hit = [];
+    for (var i = 0; i < airspace.flights.length; i++) {
+      var f = airspace.flights[i];
+      if (Math.abs((atSecond + f.tc) - f.over) < f.window) hit.push(f);
+    }
+    return hit;
   }
 
   /* Rocks. Each is aimed to pass the round at a chosen moment with a
@@ -3605,10 +3685,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       spaceZoom: Math.max(1.6, Math.min(6, spaceZoom))
     };
 
-    /* Who else is up there. A fresh sky every time the shot changes, and
-       a strike is settled here rather than hoped for in the animation. */
+    /* Rocks are settled here rather than hoped for in the animation.
+       Traffic is laid out at the count, when the launch clock exists. */
     skySeed = (skySeed + 1) >>> 0;
-    solution.airways = makeAirways(solution, skySeed);
     solution.meteors = makeMeteors(solution, skySeed * 2654435761);
     solution.strike = null;
     for (var mi = 0; mi < solution.meteors.length; mi++) {
@@ -3617,7 +3696,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         solution.strike = { t: rock.t0, miss: rock.miss, rock: rock };
       }
     }
-    setAirways(solution.airways);
+    setAirways(airspace.flights);
 
     /* Where a terrestrial shot was sent, and how far out it lands. */
     var want = aimedCity ? groundDistance(pad, aimedCity) : readPositive($('range')) * 1000;
@@ -3742,7 +3821,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      which is how an airway is drawn on any chart. */
   function setAirways(list) {
     var data = { type: 'FeatureCollection', features: [] };
-    if (list && list.length && $('showtrack').checked) {
+    if (list && list.length) {
       for (var i = 0; i < list.length; i++) {
         var w = list[i], line = [];
         for (var k = 0; k <= 24; k++) line.push(greatCirclePoint(w.from, w.to, k / 24));
@@ -3778,10 +3857,12 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       return { d: d, size: Math.max(floor, Math.min(cap, d / 70)) };
     }
 
-    var ways = solution.airways || [];
+    var ways = airspace.flights || [];
     for (var i = 0; i < ways.length; i++) {
       var w = ways[i];
-      var f = (w.at + w.speed * st.t / w.sep) % 1;
+      /* wound back so the aircraft is over its crossing at its own moment,
+         which is what makes the launch second matter */
+      var f = (w.at + w.speed * (st.t - w.tc + (w.over - flight.launchAt)) / w.sep) % 1;
       if (f < 0) f += 1;
       var here = greatCirclePoint(w.from, w.to, f);
       var ahead = greatCirclePoint(w.from, w.to, Math.min(1, f + 0.004));
@@ -3908,7 +3989,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
   var flight = {
     active: false, t: 0, rate: 1, playing: false, cam: 'chase',
-    raf: null, last: 0, struck: false,
+    raf: null, last: 0, struck: false, launchAt: 0, willHit: null,
     space: false, spaceBlend: 0,
     orbit: { az: 150, el: 22, dist: 900 }
   };
@@ -4211,6 +4292,18 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     cameraFor(st, dt);
     updateFlightVisuals(st);
     updateSky(st);
+    /* A flight the count warned about is met here, once. */
+    if (flight.willHit && flight.willHit.length && !flight.hit) {
+      var due = flight.willHit[0];
+      if (flight.t >= due.tc) {
+        flight.hit = due;
+        flight.playing = false;
+        $('playpause').textContent = '▶ Replay';
+        toast('Mid-air with ' + due.from.name + ' → ' + due.to.name +
+              ' at T+' + due.tc.toFixed(1) + ' s, ' + kmStr(due.alt) + ' up. ' +
+              'The count did warn you.', 7000);
+      }
+    }
     /* A rock that was going to hit does so here, once. */
     if (solution.strike && !flight.struck && flight.t >= solution.strike.t) {
       flight.struck = true;
@@ -4227,6 +4320,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (!solution) return;
     flight.active = true;
     flight.struck = false;
+    flight.hit = null;
     flight.space = false;
     flight.spaceBlend = 0;
     flight.t = 0;
@@ -4433,6 +4527,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     /* The question has been answered, so the search box goes back to
        being empty and the whole list returns with this one marked. */
     $('citysearch').value = '';
+    /* A new destination is a new stretch of sky to cross. */
+    pickTrafficCount();
     showDestination();
     aimChanged(brg);
     if (!quiet) {
@@ -4803,6 +4899,27 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return function () { stopped = true; };
   }
 
+  /* What the count says about the traffic: how many flights the shot
+     crosses at all, and whether going on this second hits one of them. */
+  function showTraffic(atSecond) {
+    var box = $('cd-traffic');
+    if (!box) return;
+    var n = airspace.flights.length;
+    if (!n) { box.hidden = true; return; }
+    box.hidden = false;
+    var risk = trafficRisk(atSecond);
+    $('cd-cross').textContent = n === 1 ? '1 flight crosses your path'
+                                        : n + ' flights cross your path';
+    if (risk.length) {
+      box.className = 'hot';
+      $('cd-risk').textContent = 'GO NOW AND YOU HIT ' + risk[0].from.name.toUpperCase() +
+        ' → ' + risk[0].to.name.toUpperCase() + ' at T+' + risk[0].tc.toFixed(1) + ' s';
+    } else {
+      box.className = '';
+      $('cd-risk').textContent = 'Clear if you go now';
+    }
+  }
+
   function beginCountdown() {
     if (!solution || countdown.running || flight.active) return;
     countdown.running = true;
@@ -4828,6 +4945,12 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
             ' km/s — starting at 1/20 real time so the flight is watchable.', 5000);
     }
 
+    /* Lay the traffic out now that there is a launch clock to hang it
+       on, and draw the routes it will cross. */
+    buildTraffic(solution);
+    setAirways(airspace.flights);
+    $('cd-traffic').hidden = !airspace.flights.length;
+
     var t0 = performance.now();
     var stopPreload = null;
     /* The count is the slower of two things: ten seconds on the clock,
@@ -4839,6 +4962,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       var ready = 0.75 * countdown.loaded + 0.25 * countdown.built;
       var byGround = Math.ceil(10 * (1 - ready));
       var left = Math.max(byClock, byGround);
+      /* Launching on this second, what does the round meet? */
+      showTraffic((performance.now() - t0) / 1000);
       if (left > 0) {
         if (left !== countdown.left) {
           countdown.left = left;
@@ -4852,6 +4977,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       countdown.timer = null;
       $('cd-num').textContent = 'LAUNCH';
       $('cd-num').classList.add('go');
+      /* The second the shot actually goes, which decides what it meets. */
+      flight.launchAt = (performance.now() - t0) / 1000;
+      flight.willHit = trafficRisk(flight.launchAt);
       setTimeout(function () {
         countdown.running = false;
         if (stopPreload) stopPreload();
@@ -5288,7 +5416,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   });
   $('showtrack').addEventListener('change', function () {
     setTrack(solution ? solution.points : null);
-    setAirways(solution ? solution.airways : null);
+    setAirways(airspace.flights);
   });
   $('showsite').addEventListener('change', function () {
     siteKey = '';
