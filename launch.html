@@ -2844,6 +2844,33 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return airspace.flights;
   }
 
+  /* A place on the unit sphere. */
+  function unitVec(g) {
+    var la = g.lat * D2R, lo = g.lng * D2R, c = Math.cos(la);
+    return [c * Math.cos(lo), c * Math.sin(lo), Math.sin(la)];
+  }
+
+  /* Distance from a point to the route between two places — the arc they
+     actually fly, not the great circle it sits on. The circle carries on
+     round the far side of the world, so measuring against it would count
+     a Tokyo to London sector as traffic over Australia. */
+  function offRoute(a, b, p) {
+    var u = unitVec(a), v = unitVec(b), w = unitVec(p);
+    var n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    var nl = Math.hypot(n[0], n[1], n[2]);
+    if (nl < 1e-12) return groundDistance(a, p);
+    var cross = Math.asin(Math.max(-1, Math.min(1,
+      (w[0] * n[0] + w[1] * n[1] + w[2] * n[2]) / nl)));
+    var dAB = groundDistance(a, b) / R_E;
+    var alongA = Math.acos(Math.max(-1, Math.min(1,
+      Math.cos(groundDistance(a, p) / R_E) / Math.cos(cross))));
+    if (alongA > dAB) return Math.min(groundDistance(a, p), groundDistance(b, p));
+    var alongB = Math.acos(Math.max(-1, Math.min(1,
+      Math.cos(groundDistance(b, p) / R_E) / Math.cos(cross))));
+    if (alongB > dAB) return Math.min(groundDistance(a, p), groundDistance(b, p));
+    return Math.abs(cross) * R_E;
+  }
+
   /* How far along a route a place falls, 0 at one end and 1 at the other. */
   function alongRoute(a, b, p) {
     var dAB = groundDistance(a, b) || 1;
@@ -4949,7 +4976,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
        on, and draw the routes it will cross. */
     buildTraffic(solution);
     setAirways(airspace.flights);
-    $('cd-traffic').hidden = !airspace.flights.length;
+    showTraffic(0);                 /* on screen before the first tick */
 
     var t0 = performance.now();
     var stopPreload = null;

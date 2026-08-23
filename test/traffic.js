@@ -54,12 +54,13 @@ const done = () => clearTimeout(WATCHDOG);
     await p.waitForTimeout(2600);
     /* the count is not on screen until the countdown, so fire and read it */
     await p.evaluate(() => document.getElementById('fire').click());
-    await p.waitForTimeout(2200);
+    await p.waitForTimeout(3600);
     const seen = await p.evaluate(() => ({
       shown: !document.getElementById('cd-traffic').hidden,
       cross: document.getElementById('cd-cross').textContent,
       risk: document.getElementById('cd-risk').textContent,
-      routes: (() => { try { return window.netherlayerRange.querySourceFeatures('airways').length; } catch (e) { return -1; } })()
+      routes: (() => { try { return window.netherlayerRange.querySourceFeatures('airways').length; } catch (e) { return -1; } })(),
+      inSource: (() => { try { const d = window.netherlayerRange.getSource('airways').serialize(); return d.data.features.length; } catch (e) { return -1; } })()
     }));
     counts.push(seen);
     console.log(('after ' + name).padEnd(18), JSON.stringify(seen));
@@ -83,7 +84,9 @@ const done = () => clearTimeout(WATCHDOG);
   console.log('\nflight counts across six destinations:', JSON.stringify(nums));
   console.log('  all within 1..10:', nums.every(n => n >= 1 && n <= 10));
   console.log('  they vary       :', new Set(nums).size > 1);
-  console.log('  routes on the map:', JSON.stringify(counts.map(c => c.routes)));
+  console.log('  routes in the source:', JSON.stringify(counts.map(c => c.inSource)));
+  console.log('  routes tiled near view:', JSON.stringify(counts.map(c => c.routes)));
+  console.log('  source count matches flights:', counts.every(c => c.inSource === (/(\d+)/.exec(c.cross) ? +/(\d+)/.exec(c.cross)[1] : -1)));
 
   console.log('\n' + (errs.length ? errs.slice(0,4).join('\n') : 'no js errors'));
   await browser.close(); done();
