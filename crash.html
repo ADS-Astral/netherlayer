@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>The mid-air — netherlayer</title>
+<style>
+  :root {
+    --bg: #0e0e1c; --sh-dark: #07070f; --gold: #d4af37; --gold2: #f0c040;
+    --text: #d8d8f0; --muted: #7070a0; --green: #2ecc71; --red: #e74c3c;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); overflow-y: auto;
+    font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 22px 16px 40px; gap: 18px;
+  }
+  h1 { font-size: 15px; letter-spacing: .1em; text-transform: uppercase;
+       color: var(--gold2); margin: 0; font-weight: 700; }
+  p.lede { margin: 0; max-width: 620px; text-align: center; color: var(--muted); }
+  video {
+    width: min(100%, 900px); background: #000; border-radius: 12px;
+    border: 1px solid rgba(212,175,55,.35); box-shadow: 0 20px 70px rgba(0,0,0,.7);
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  button, a.btn {
+    font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
+    padding: 9px 20px; border-radius: 10px; color: var(--text);
+    background: rgba(20,20,40,.9); border: 1px solid rgba(212,175,55,.32);
+  }
+  button:hover, a.btn:hover { color: var(--gold2); border-color: rgba(212,175,55,.6); }
+  button.go { background: rgba(60,44,10,.9); border-color: var(--gold); color: var(--gold2); }
+  #verdict { font-weight: 700; text-align: center; max-width: 620px; }
+  #verdict.ok { color: var(--green); }
+  #verdict.bad { color: var(--red); }
+  #report {
+    width: min(100%, 900px); margin: 0; padding: 14px 16px; border-radius: 12px;
+    background: var(--sh-dark); border: 1px solid rgba(212,175,55,.18);
+    font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--text); white-space: pre-wrap; word-break: break-word;
+  }
+  .hint { color: var(--muted); font-size: 12.5px; max-width: 620px; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>The mid-air</h1>
+<p class="lede">
+  The five seconds the range plays when a round meets an airliner. This page does
+  nothing else, so if it plays here and not there the fault is the range's; if it
+  will not play here either, the fault is the file, the browser or the server —
+  and the readout below says which.
+</p>
+
+<video id="v" playsinline controls preload="auto"></video>
+
+<div class="row">
+  <button class="go" id="again">▶ Play it</button>
+  <button id="muted">▶ Play muted</button>
+  <button id="copy">Copy the readout</button>
+  <a class="btn" id="back" href="launch.html">← Back to the range</a>
+</div>
+
+<div id="verdict">Loading…</div>
+<pre id="report">…</pre>
+<p class="hint">
+  If this page is stale, empty the cache and reload — a hard refresh
+  (⇧⌘R, or Ctrl+F5) is usually enough.
+</p>
+
+<script>
+(function () {
+  function $(id) { return document.getElementById(id); }
+  var CLIP = 'higgsfield-35fceea8-2207-4af3-993a-3c3860254750.mp4';
+  var v = $('v'), out = [], t0 = performance.now();
+  function at() { return String(Math.round(performance.now() - t0)).padStart(5) + ' ms  '; }
+  function say(line) { out.push(at() + line); $('report').textContent = out.join('\n'); }
+  /* Several things notice the same failure and each has its own idea of
+     what to call it. A refused play() is what you always see last and
+     explains least, so the headline is whichever finding carries the
+     most weight, not whichever spoke most recently. */
+  var told = 0;
+  function verdict(rank, text, good) {
+    if (rank < told) return;
+    told = rank;
+    var e = $('verdict');
+    e.textContent = text;
+    e.className = good === true ? 'ok' : good === false ? 'bad' : '';
+  }
+  var WEAK = 1, ERROR = 2, ROOT = 3, PLAYS = 4;
+
+  /* What this browser will admit to before anything is loaded. */
+  var probe = document.createElement('video');
+  say('user agent   ' + navigator.userAgent);
+  say('mp4          "' + (probe.canPlayType('video/mp4') || '(nothing)') + '"');
+  say('H.264 base   "' + (probe.canPlayType('video/mp4; codecs="avc1.42E01E"') || '(nothing)') + '"');
+  say('H.264 high   "' + (probe.canPlayType('video/mp4; codecs="avc1.640028"') || '(nothing)') + '"');
+  say('AAC          "' + (probe.canPlayType('audio/mp4; codecs="mp4a.40.2"') || '(nothing)') + '"');
+  if (!probe.canPlayType('video/mp4; codecs="avc1.42E01E"')) {
+    verdict(ROOT, 'This browser says it cannot decode H.264. That is the whole answer — ' +
+            'the clip needs re-encoding, or a second copy in a format this browser takes.', false);
+  }
+
+  /* What the server actually hands over, separately from the player. */
+  fetch(CLIP, { method: 'GET', headers: { Range: 'bytes=0-1023' } }).then(function (r) {
+    say('server       HTTP ' + r.status + ' ' + r.statusText);
+    say('  type       ' + (r.headers.get('content-type') || '(none given)'));
+    say('  length     ' + (r.headers.get('content-length') || '(none given)'));
+    say('  ranges     ' + (r.headers.get('accept-ranges') || '(not advertised)'));
+    if (!r.ok) {
+      verdict(ROOT, 'The server answers HTTP ' + r.status + ' for the clip. It is not ' +
+              'deployed beside this page, so there is nothing for any player to play.', false);
+    }
+    return r.arrayBuffer();
+  }).then(function (buf) {
+    var b = new Uint8Array(buf), s = '';
+    for (var i = 0; i < Math.min(b.length, 64); i++) s += String.fromCharCode(b[i]);
+    var box = s.slice(4, 8), brand = s.slice(8, 12);
+    say('  first box  ' + (box || '(empty)') + '   brand ' + (brand || '(none)'));
+    if (b.length && box !== 'ftyp') {
+      say('  !! that is not the start of an MP4 — the server is sending something else');
+      verdict(ROOT, 'The server answers, but what it sends is not an MP4. That is the ' +
+              'fault; nothing on the player side can fix it.', false);
+    }
+  }).catch(function (e) {
+    say('server       request failed: ' + e.message);
+    verdict(ROOT, 'The video file could not be fetched at all. Check it is deployed ' +
+            'next to this page.', false);
+  });
+
+  ['loadstart','loadedmetadata','loadeddata','canplay','canplaythrough',
+   'play','playing','pause','ended','waiting','stalled','suspend','error','abort'].forEach(function (n) {
+    v.addEventListener(n, function () {
+      var extra = ' (ready ' + v.readyState + ', network ' + v.networkState + ')';
+      if (n === 'loadedmetadata') extra = ' — ' + v.videoWidth + '×' + v.videoHeight +
+                                          ', ' + v.duration.toFixed(2) + ' s';
+      if (n === 'error' && v.error) extra = ' — code ' + v.error.code + ': ' +
+                                           (v.error.message || '(no message)');
+      say('video        ' + n + extra);
+      if (n === 'playing') verdict(PLAYS, 'It plays. The file, the server and this browser are all fine, ' +
+                                   'so anything wrong is in the range page.', true);
+      if (n === 'error') verdict(ERROR, 'The player could not open the file: MediaError ' + v.error.code +
+                                 '. ' + (v.error.message || ''), false);
+    });
+  });
+
+  function tryPlay(quiet) {
+    v.muted = !!quiet;
+    say('calling      play()' + (quiet ? ' muted' : ' with sound'));
+    var p = v.play();
+    if (p && p.catch) p.catch(function (e) {
+      say('  refused    ' + e.name + ': ' + e.message);
+      if (!quiet) { say('  going again without sound'); tryPlay(true); }
+      else verdict(WEAK, 'The browser refuses to start it even muted: ' + e.name +
+                   '. If the readout shows nothing else wrong, that is the autoplay ' +
+                   'rules — the Play button above overrides them.', false);
+    });
+  }
+
+  $('again').onclick = function () { v.muted = false; tryPlay(false); };
+  $('muted').onclick = function () { tryPlay(true); };
+  $('copy').onclick = function () {
+    navigator.clipboard.writeText(out.join('\n')).then(
+      function () { $('copy').textContent = 'Copied'; },
+      function () { $('copy').textContent = 'Select it by hand'; });
+  };
+
+  /* Come back where you came from, if the range sent you. */
+  var from = new URLSearchParams(location.search).get('from');
+  if (from) {
+    $('back').href = from;
+    $('back').textContent = '← Back to the flight';
+  }
+
+  v.src = CLIP;
+  v.load();
+  say('asked for    ' + CLIP);
+  /* Try it unprompted; a fresh page with no gesture behind it is the
+     hardest case there is, so failing here is informative rather than
+     alarming — the buttons above are the real test. */
+  tryPlay(false);
+})();
+</script>
+</body>
+</html>

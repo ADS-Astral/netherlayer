@@ -5048,7 +5048,15 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       try { v.pause(); } catch (e) {}
       after();
     }
-    function give() { crashCut.dead = true; end(); }
+    function give() {
+      crashCut.dead = true;
+      /* Say so rather than skipping in silence: an invisible cut is
+         indistinguishable from a broken one, and crash.html answers
+         which in a single click. */
+      toast('The mid-air clip would not play here — open crash.html to see why. ' +
+            'The flight carries on.', 6000);
+      end();
+    }
     v.onplaying = function () {
       box.hidden = false;
       /* Whatever happens to the clip, it cannot hold the flight up. */
