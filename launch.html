@@ -4366,6 +4366,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         flight.hit = due;
         var was = flight.playing;
         flight.playing = false;
+        /* Land on the collision itself rather than a frame past it: the
+           canopy starts inflating at this instant, and the cut belongs
+           in front of it, not after. */
+        flight.t = due.tc;
+        updateFlightVisuals(stateAt(flight.t));
         playCrashCut(function () {
           /* and on, under canopy, down to where it happened */
           toast('Mid-air with ' + due.from.name + ' → ' + due.to.name +
@@ -4911,7 +4916,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (flight.willHit.length) {
       chuteForced = flight.willHit[0].tc;
       solve();
-      armCrashClip();
+      armCrashClip();               /* already under way; harmless twice */
     }
   }
 
@@ -5001,8 +5006,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 
   /* ── The mid-air ───────────────────────────────────────────────────
      Five seconds of it, then the round comes down under canopy from
-     where it happened. The clip is only fetched when the count knows a
-     collision is coming, so a clean shot never pays for it. */
+     where it happened. The clip is fetched during the count, which is
+     the only window wide enough for it: a crossing can be met less than
+     a second after the round leaves the rails, and two megabytes do not
+     arrive in that. A shot with nothing in its way never asks for it. */
   var CRASH_CLIP = 'higgsfield-35fceea8-2207-4af3-993a-3c3860254750.mp4';
   var crashCut = { armed: false, playing: false, dead: false };
 
@@ -5011,14 +5018,21 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (!v || crashCut.armed) return;
     crashCut.armed = true;
     v.onerror = function () { crashCut.dead = true; };
+    /* preload="none" in the markup keeps a clean shot from paying for
+       this at all; the moment it is wanted, ask for the whole thing.
+       Setting src under preload="none" selects the file and downloads
+       none of it, which leaves play() starting from nothing. */
+    v.preload = 'auto';
     v.src = CRASH_CLIP;
     v.load();
   }
 
-  /* The cut is only put on screen once the video is actually running.
-     A browser with no decoder for it, or one that refuses to start it,
-     then costs nothing at all rather than a black frame that appears
-     and vanishes; the flight simply carries on into the descent. */
+  /* The cut goes on screen once the video is genuinely running, never
+     before: a browser with no decoder for it, or one that will not
+     start it, then costs nothing rather than a black frame that appears
+     and vanishes. A clip that is merely slow is waited for — the round
+     is held at the collision either way — but only a real error puts
+     the cut away for the rest of the session. */
   function playCrashCut(after) {
     var box = $('crashcut'), v = $('crashvid');
     if (!box || !v || crashCut.playing || crashCut.dead) { after(); return; }
@@ -5030,7 +5044,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       if (guard) clearTimeout(guard);
       box.hidden = true;
       crashCut.playing = false;
-      v.onplaying = v.onended = v.onerror = null;
+      v.onplaying = v.onended = v.onerror = v.oncanplay = null;
       try { v.pause(); } catch (e) {}
       after();
     }
@@ -5044,22 +5058,28 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     v.onended = end;
     v.onerror = give;
     $('crash-skip').onclick = end;
-    /* Nothing on screen yet, so a clip that never starts gets a short
-       leash rather than the whole length of one. */
-    guard = setTimeout(give, 2500);
-    /* Back to the top: a second launch that also ends in a mid-air
-       would otherwise find the clip already at its last frame. */
-    try { v.currentTime = 0; } catch (e) {}
-    /* The Fire button was a gesture, but it was ten seconds and a
-       countdown ago, so a browser is within its rights to refuse sound.
-       Rather than lose the shot of it, go again without. */
-    var go = v.play();
-    if (go && go.catch) go.catch(function () {
-      if (finished) return;
-      v.muted = true;
-      var quiet = v.play();
-      if (quiet && quiet.catch) quiet.catch(give);
-    });
+    /* Long enough for a slow line to deliver it, short enough that a
+       clip which is never coming does not strand the flight. Running
+       out of patience skips this one cut; it does not condemn the file. */
+    guard = setTimeout(end, 12000);
+
+    function go() {
+      /* Back to the top: a second launch that also ends in a mid-air
+         would otherwise find the clip already at its last frame. */
+      try { v.currentTime = 0; } catch (e) {}
+      /* The Fire button was a gesture, but it was ten seconds and a
+         countdown ago, so a browser is within its rights to refuse
+         sound. Rather than lose the shot of it, go again without. */
+      var p = v.play();
+      if (p && p.catch) p.catch(function () {
+        if (finished) return;
+        v.muted = true;
+        var quiet = v.play();
+        if (quiet && quiet.catch) quiet.catch(give);
+      });
+    }
+    if (v.readyState >= 2) go();
+    else { v.oncanplay = function () { v.oncanplay = null; go(); }; if (!crashCut.armed) armCrashClip(); }
   }
 
   /* What the count says about the traffic: how many flights the shot
@@ -5113,6 +5133,10 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     buildTraffic(solution);
     setAirways(airspace.flights);
     showTraffic(0);                 /* on screen before the first tick */
+    /* Something up there to hit means the clip may be wanted in about
+       ten seconds. Start it down now: the count is the only window wide
+       enough, since a crossing can be met a second after the rails. */
+    if (airspace.flights.length) armCrashClip();
 
     var t0 = performance.now();
     countdown.t0 = t0;

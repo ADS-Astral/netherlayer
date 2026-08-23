@@ -64,13 +64,21 @@ async function recordStandin(browser) {
   p.setDefaultTimeout(90000);
   const shot = (o) => p.screenshot(o).catch(e => console.log('!! shot skipped: ' + String(e.message).split('\n')[0]));
   const errs = []; let clipAsked = 0; let served = 'the clip itself';
+  /* Serve it the way a network does, not the way a disk does. The bug
+     this guards against was invisible at disk speed: the clip was armed
+     with preload="none" (so nothing downloaded until play), and a short
+     fuse then gave up on it and disabled the cut for the whole session.
+     Three seconds is longer than that fuse was. */
+  const CLIP_LAG = Number(process.env.CLIP_LAG || 3000);
+  let clipAskedAt = []; let firedAt = 0;
   p.on('pageerror', e => errs.push('ERR ' + e.message.slice(0, 200)));
   await p.route('**/*', async r => {
     const u = r.request().url();
     if (u.startsWith('https://netherlayer.local/')) {
       const f = SITE + decodeURIComponent(u.split('/').pop().split('?')[0]);
       if (f.endsWith('.mp4')) {
-        clipAsked++;
+        clipAsked++; clipAskedAt.push(Date.now());
+        await new Promise(go => setTimeout(go, CLIP_LAG));
         if (standin) return r.fulfill({ status: 200, body: standin, contentType: 'video/webm' });
         return fs.existsSync(f) ? r.fulfill({ path: f, contentType: 'video/mp4' }) : r.fulfill({ status: 404, body: '' });
       }
@@ -89,6 +97,7 @@ async function recordStandin(browser) {
   const canH264 = await p.evaluate(() => document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"') || '(no)');
   console.log('this browser plays H.264:', canH264);
   if (standin) { served = 'a recorded WebM in its place'; console.log('serving ' + served + ', ' + standin.length + ' bytes — the cut is exercised, the shipped file is not'); }
+  console.log('the clip is held back ' + CLIP_LAG + ' ms, as a network would');
 
   await p.evaluate(() => { const e = document.getElementById('sharpness'); if (e) { e.value='soft'; e.dispatchEvent(new Event('change')); } });
   for (const id of ['showsite','showbuildings']) await p.evaluate(i => { const c = document.getElementById(i); if (c && c.checked) { c.checked=false; c.dispatchEvent(new Event('change')); } }, id);
@@ -131,6 +140,7 @@ async function recordStandin(browser) {
         document.getElementById('cd-skip').click();          /* same turn: no round trip */
         return true;
       });
+      if (went) firedAt = Date.now();
       if (went) { warned++; break; }
       if (await p.evaluate(() => document.getElementById('countdown').hidden)) break;
       await p.waitForTimeout(250);
@@ -182,6 +192,10 @@ async function recordStandin(browser) {
   console.log('the cut came up         : ' + (opened.length > 0) + (held ? ' and held ' + held + ' ms' : ''));
   console.log('the cut cleared again   : ' + (closed.length > 0));
   console.log('the clip was fetched    : ' + (clipAsked > 0) + ' (' + served + ')');
+  const early = clipAskedAt.length && firedAt && clipAskedAt[0] < firedAt;
+  console.log('asked for during the count: ' + !!early +
+              (clipAskedAt.length && firedAt ? '  (' + Math.round((firedAt - clipAskedAt[0]) / 1000) + ' s of head start)' : ''));
+  if (hit && !early) console.log('*** WRONG: the clip is not asked for until it is already needed');
 
   await p.waitForTimeout(3000);
   const after = await p.evaluate(() => {

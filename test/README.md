@@ -27,7 +27,7 @@ in `test/.cache/` and `test/*.png`, both ignored by git.
 | `rail.js` | the rail is three.js boxes: length, bore gap, rail height and elevation each visibly shape it |
 | `impact.js` | whether the round lands on the terrain under it or on a flat sea level |
 | `traffic.js` | one to ten crossing flights per destination, the count on screen, and the risk line by the second |
-| `crash.js` | a mid-air: the clip plays on the collision and the round comes down under canopy where it happened |
+| `crash.js` | a mid-air: the clip is fetched during the count, plays on the collision, and the round comes down under canopy where it happened |
 | `three-site.js` | the hangar and tank models load and the model layer goes up; takes screenshots of the site |
 | `fallback-models.js` | with three.js and both models blocked, the site still stands, still solves, still fires |
 
@@ -55,6 +55,13 @@ flight gets anywhere — a shot with a twenty-minute arc advances about half a
 second and then sits. Tests that need the round somewhere specific move the
 scrub bar, which writes the same `flight.t` the animation would have, and
 assert on what the page does with it. Waiting is not an alternative here.
+
+**The clip is served slowly on purpose.** `crash.js` holds the video back
+three seconds (`CLIP_LAG`) before answering. Serving it at disk speed once hid
+a bug that made the cut fail every time in a real browser: the element carried
+`preload="none"`, so arming it downloaded nothing, and a short fuse then gave
+up and disabled the cut for the rest of the session. Anything timed against a
+network needs to be tested against one.
 
 **Chromium here has no H.264.** The Playwright build ships without the
 proprietary codecs, so it cannot decode the crash clip the page carries.
