@@ -532,6 +532,11 @@ body.flying #aimchip, body.placing #aimchip { display: none; }
   border: 1px solid rgba(212,175,55,.35);
 }
 #crashcut .btn { width: auto; padding: 8px 22px; pointer-events: auto; }
+#crashcue {
+  font-size: clamp(28px, 6vw, 54px); font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--red); text-shadow: 0 0 26px rgba(231,76,60,.5);
+}
+#crashcut video.waiting { display: none; }
 #cd-traffic {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   padding: 8px 16px; margin-bottom: 4px; border-radius: 10px;
@@ -859,6 +864,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 </div>
 
 <div id="crashcut" hidden>
+  <div id="crashcue" hidden>Mid-air</div>
   <video id="crashvid" playsinline preload="none" width="960"></video>
   <button class="btn" id="crash-skip">Skip</button>
 </div>
@@ -5037,12 +5043,16 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var box = $('crashcut'), v = $('crashvid');
     if (!box || !v || crashCut.playing || crashCut.dead) { after(); return; }
     crashCut.playing = true;
-    var finished = false, guard = null;
+    var cue = $('crashcue');
+    var finished = false, guard = null, cueTimer = null;
     function end() {
       if (finished) return;
       finished = true;
       if (guard) clearTimeout(guard);
+      if (cueTimer) clearTimeout(cueTimer);
       box.hidden = true;
+      if (cue) cue.hidden = true;
+      v.classList.remove('waiting');
       crashCut.playing = false;
       v.onplaying = v.onended = v.onerror = v.oncanplay = null;
       try { v.pause(); } catch (e) {}
@@ -5058,6 +5068,9 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       end();
     }
     v.onplaying = function () {
+      if (cueTimer) clearTimeout(cueTimer);
+      if (cue) cue.hidden = true;
+      v.classList.remove('waiting');
       box.hidden = false;
       /* Whatever happens to the clip, it cannot hold the flight up. */
       if (guard) clearTimeout(guard);
@@ -5070,6 +5083,19 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
        clip which is never coming does not strand the flight. Running
        out of patience skips this one cut; it does not condemn the file. */
     guard = setTimeout(end, 12000);
+    /* The round is held at the collision while the clip is fetched, and
+       a held flight showing nothing at all reads as a hang. If the wait
+       is long enough to notice, put the word up — with the player kept
+       out of sight, since an empty one is a black hole in the middle of
+       the screen. Nothing to see on a clip that starts promptly. */
+    if (v.readyState < 2 && cue) {
+      cueTimer = setTimeout(function () {
+        if (finished) return;
+        v.classList.add('waiting');
+        cue.hidden = false;
+        box.hidden = false;
+      }, 700);
+    }
 
     function go() {
       /* Back to the top: a second launch that also ends in a mid-air

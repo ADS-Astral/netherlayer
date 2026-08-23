@@ -128,7 +128,7 @@ async function recordStandin(browser) {
   /* Fire repeatedly and let it go on a second the count itself calls
      dangerous. The check and the skip happen in one page turn, so the
      shot leaves inside the window rather than a round trip after it. */
-  let hit = false, tries = 0, warned = 0, during = null;
+  let hit = false, tries = 0, warned = 0, during = null, waited = false;
   while (!hit && tries++ < 12 && Date.now() - T0 < BUDGET - 120000) {
     await p.evaluate(() => { window.__cut = []; document.getElementById('fire').click(); });
     await p.waitForTimeout(1800);
@@ -174,8 +174,13 @@ async function recordStandin(browser) {
       await p.evaluate(v => { const s = document.getElementById('scrub'); s.value = String(v); s.dispatchEvent(new Event('input')); }, at);
       for (let k = 0; k < 26; k++) {
         await p.waitForTimeout(600);
-        const now = await p.evaluate(() => ({ cut: !document.getElementById('crashcut').hidden, t: document.getElementById('h-t').textContent }));
-        if (now.cut && !during) { during = true; console.log('the cut is up, at ' + now.t); await shot({ path: OUT + 'C-cut.png' }); }
+        const now = await p.evaluate(() => ({ cut: !document.getElementById('crashcut').hidden,
+          cue: !document.getElementById('crashcue').hidden,
+          hiddenVid: document.getElementById('crashvid').classList.contains('waiting'),
+          t: document.getElementById('h-t').textContent }));
+        if (now.cue) waited = true;
+        if (now.cut && !now.cue && !during) { during = true; console.log('the cut is up, at ' + now.t); await shot({ path: OUT + 'C-cut.png' }); }
+        if (now.cue && now.cut && !now.hiddenVid) console.log('*** WRONG: an empty player is on screen while waiting');
         if (during && !now.cut) { console.log('the cut clears again'); break; }
       }
       break;
@@ -191,6 +196,7 @@ async function recordStandin(browser) {
   console.log('the mid-air landed      : ' + hit);
   console.log('the cut came up         : ' + (opened.length > 0) + (held ? ' and held ' + held + ' ms' : ''));
   console.log('the cut cleared again   : ' + (closed.length > 0));
+  console.log('waited behind a cue     : ' + waited + (waited ? ' (the clip was not ready at the collision)' : ''));
   console.log('the clip was fetched    : ' + (clipAsked > 0) + ' (' + served + ')');
   const early = clipAskedAt.length && firedAt && clipAskedAt[0] < firedAt;
   console.log('asked for during the count: ' + !!early +
