@@ -130,6 +130,30 @@
             'next to this page.', false);
   });
 
+  /* Which build of the range is actually deployed here. A page held in
+     the browser's cache behaves exactly like a fix that did not work,
+     and this tells the two apart. */
+  fetch('launch.html', { cache: 'no-store' }).then(function (r) { return r.text(); })
+    .then(function (html) {
+      var fixes = [
+        ["preload set before loading", /v\.preload = 'auto'/],
+        ["armed at the start of the count", /if \(airspace\.flights\.length\) armCrashClip\(\)/],
+        ["stops on the collision second", /flight\.t = due\.tc/]
+      ];
+      var missing = fixes.filter(function (f) { return !f[1].test(html); });
+      say('range page   ' + Math.round(html.length / 1024) + ' kB deployed here');
+      fixes.forEach(function (f) {
+        say('  ' + (f[1].test(html) ? '✓' : '✗') + '  ' + f[0]);
+      });
+      if (missing.length) {
+        verdict(ROOT, 'The range page deployed here is an older build — ' + missing.length +
+                ' of the video fixes are not in it. Nothing else matters until that updates.', false);
+      } else {
+        say('  the deployed range page has every video fix in it');
+        say('  if the range still misbehaves, your copy of it is cached — hard refresh it');
+      }
+    }).catch(function (e) { say('range page   could not be read: ' + e.message); });
+
   ['loadstart','loadedmetadata','loadeddata','canplay','canplaythrough',
    'play','playing','pause','ended','waiting','stalled','suspend','error','abort'].forEach(function (n) {
     v.addEventListener(n, function () {
