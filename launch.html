@@ -4361,43 +4361,45 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
         toast(end, 4000);
       }
     }
+    /* A flight the count warned about is met before this frame is drawn,
+       not after. The canopy is torn open at the collision, so a frame
+       rendered even a fraction past it has the parachute already coming
+       out — which is the one thing that must not be on screen before the
+       cut. Clamping first means the last frame anyone sees is the moment
+       of the collision, canopy still stowed. */
+    var due = (flight.willHit && flight.willHit.length && !flight.hit) ? flight.willHit[0] : null;
+    var meeting = due !== null && flight.t >= due.tc;
+    if (meeting) flight.t = due.tc;
+
     var st = stateAt(flight.t);
     cameraFor(st, dt);
     updateFlightVisuals(st);
     updateSky(st);
-    /* A flight the count warned about is met here, once. */
-    if (flight.willHit && flight.willHit.length && !flight.hit) {
-      var due = flight.willHit[0];
-      if (flight.t >= due.tc) {
-        flight.hit = due;
-        var was = flight.playing;
-        flight.playing = false;
-        /* Land on the collision itself rather than a frame past it: the
-           canopy starts inflating at this instant, and the cut belongs
-           in front of it, not after. */
-        flight.t = due.tc;
-        updateFlightVisuals(stateAt(flight.t));
-        playCrashCut(function () {
-          /* and on, under canopy, down to where it happened */
-          toast('Mid-air with ' + due.from.name + ' → ' + due.to.name +
-                ' at T+' + due.tc.toFixed(1) + ' s, ' + kmStr(due.alt) + ' up. ' +
-                'Canopy out — coming down at the crash site.', 7000);
-          /* Under canopy the round takes minutes to come down, which is
-             not minutes anybody wants to sit through. Run the descent at
-             whatever rate brings it in inside half a minute. */
-          var left = Math.max(0, solution.dur - due.tc);
-          if (left > 30) {
-            flight.rate = Math.min(50, left / 25);   /* 50 is the dial's ceiling */
-            $('rate').value = String(sliderFromRate(flight.rate));
-            $('ratelbl').textContent = rateLabel(flight.rate);
-          }
-          if (was && flight.active) {
-            flight.playing = true;
-            flight.last = 0;
-            $('playpause').textContent = '❚❚ Pause';
-          }
-        });
-      }
+
+    if (meeting) {
+      flight.hit = due;
+      var was = flight.playing;
+      flight.playing = false;
+      playCrashCut(function () {
+        /* and on, under canopy, down to where it happened */
+        toast('Mid-air with ' + due.from.name + ' → ' + due.to.name +
+              ' at T+' + due.tc.toFixed(1) + ' s, ' + kmStr(due.alt) + ' up. ' +
+              'Canopy out — coming down at the crash site.', 7000);
+        /* Under canopy the round takes minutes to come down, which is
+           not minutes anybody wants to sit through. Run the descent at
+           whatever rate brings it in inside half a minute. */
+        var left = Math.max(0, solution.dur - due.tc);
+        if (left > 30) {
+          flight.rate = Math.min(50, left / 25);   /* 50 is the dial's ceiling */
+          $('rate').value = String(sliderFromRate(flight.rate));
+          $('ratelbl').textContent = rateLabel(flight.rate);
+        }
+        if (was && flight.active) {
+          flight.playing = true;
+          flight.last = 0;
+          $('playpause').textContent = '❚❚ Pause';
+        }
+      });
     }
     /* A rock that was going to hit does so here, once. */
     if (solution.strike && !flight.struck && flight.t >= solution.strike.t) {

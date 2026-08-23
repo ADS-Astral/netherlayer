@@ -110,6 +110,13 @@ async function recordStandin(browser) {
     const box = document.getElementById('crashcut');
     new MutationObserver(() => window.__cut.push({ shown: !box.hidden, at: performance.now() }))
       .observe(box, { attributes: true, attributeFilter: ['hidden'] });
+    /* The canopy announces itself; if it does so before the cut, the
+       parachute beat the video and the order is wrong. */
+    window.__canopy = null;
+    const t = document.getElementById('toast');
+    new MutationObserver(() => {
+      if (window.__canopy === null && /Canopy out —/.test(t.textContent)) window.__canopy = performance.now();
+    }).observe(t, { childList: true, characterData: true, subtree: true, attributes: true });
   });
 
   await p.evaluate(() => document.querySelector('[data-pane="p-target"]').click());
@@ -177,9 +184,19 @@ async function recordStandin(browser) {
         const now = await p.evaluate(() => ({ cut: !document.getElementById('crashcut').hidden,
           cue: !document.getElementById('crashcue').hidden,
           hiddenVid: document.getElementById('crashvid').classList.contains('waiting'),
+          canopy: window.__canopy,
           t: document.getElementById('h-t').textContent }));
         if (now.cue) waited = true;
-        if (now.cut && !now.cue && !during) { during = true; console.log('the cut is up, at ' + now.t); await shot({ path: OUT + 'C-cut.png' }); }
+        if (now.cut && !now.cue && !during) {
+          during = true;
+          console.log('the cut is up, at ' + now.t + ' (the collision is at ' + st.canopy + ')');
+          if (now.t.replace(/\s/g, '') !== st.canopy.replace(/\s/g, ''))
+            console.log('*** WRONG: the flight ran past the collision before the cut — ' +
+                        'the canopy will already be coming out');
+          if (now.canopy !== null)
+            console.log('*** WRONG: the canopy was announced before the cut played');
+          await shot({ path: OUT + 'C-cut.png' });
+        }
         if (now.cue && now.cut && !now.hiddenVid) console.log('*** WRONG: an empty player is on screen while waiting');
         if (during && !now.cut) { console.log('the cut clears again'); break; }
       }
@@ -197,6 +214,9 @@ async function recordStandin(browser) {
   console.log('the cut came up         : ' + (opened.length > 0) + (held ? ' and held ' + held + ' ms' : ''));
   console.log('the cut cleared again   : ' + (closed.length > 0));
   console.log('waited behind a cue     : ' + waited + (waited ? ' (the clip was not ready at the collision)' : ''));
+  const order = await p.evaluate(() => window.__canopy);
+  console.log('canopy came after the cut: ' + (order === null ? '(not announced yet)' : 'announced, ' +
+              (opened.length ? Math.round(order - opened[0].at) + ' ms after the cut opened' : 'no cut to compare')));
   console.log('the clip was fetched    : ' + (clipAsked > 0) + ' (' + served + ')');
   const early = clipAskedAt.length && firedAt && clipAskedAt[0] < firedAt;
   console.log('asked for during the count: ' + !!early +
