@@ -3,7 +3,7 @@
 # Each one has its own watchdog, so this cannot hang.
 cd "$(dirname "$0")/.." || exit 1
 fail=0
-for t in fallback-models three-site dest missile rail impact traffic order flight console mobile; do
+for t in fallback-models three-site dest missile rail impact traffic crash order flight console mobile; do
   s=$SECONDS
   out=$(node "test/$t.js" 2>&1)
   took=$((SECONDS - s))

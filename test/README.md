@@ -27,6 +27,7 @@ in `test/.cache/` and `test/*.png`, both ignored by git.
 | `rail.js` | the rail is three.js boxes: length, bore gap, rail height and elevation each visibly shape it |
 | `impact.js` | whether the round lands on the terrain under it or on a flat sea level |
 | `traffic.js` | one to ten crossing flights per destination, the count on screen, and the risk line by the second |
+| `crash.js` | a mid-air: the clip plays on the collision and the round comes down under canopy where it happened |
 | `three-site.js` | the hangar and tank models load and the model layer goes up; takes screenshots of the site |
 | `fallback-models.js` | with three.js and both models blocked, the site still stands, still solves, still fires |
 
@@ -48,13 +49,27 @@ into once. Keep the per-action budget modest, keep the watchdog, and keep
 screenshots non-fatal — they force a whole frame and are the slowest thing in
 any of these runs.
 
+**Nothing plays through.** A frame of the launch view costs seconds on the
+CPU rasteriser, and `requestAnimationFrame` stops being served long before a
+flight gets anywhere — a shot with a twenty-minute arc advances about half a
+second and then sits. Tests that need the round somewhere specific move the
+scrub bar, which writes the same `flight.t` the animation would have, and
+assert on what the page does with it. Waiting is not an alternative here.
+
+**Chromium here has no H.264.** The Playwright build ships without the
+proprietary codecs, so it cannot decode the crash clip the page carries.
+`crash.js` records four seconds of WebM out of the browser itself and serves
+that in the clip's place, which drives the same element and the same events;
+it reports the browser's own `canPlayType` answer separately so the swap is
+never mistaken for a pass on the real file.
+
 A fresh checkout has an empty cache, so each file pulls MapLibre down before
 navigating — fetching a megabyte while the page is already booting loses the
 race and the loader never clears.
 
 Typical times on the CPU rasteriser: `fallback` 60 s, `three-site` 125 s,
 `dest` 140 s, `missile` 180 s, `rail` 210 s, `impact` 230 s, `order` 240 s,
-`traffic` 260 s, `flight` 300 s, `console` 325 s, `mobile` 425 s.
+`traffic` 260 s, `crash` 300 s, `flight` 300 s, `console` 325 s, `mobile` 425 s.
 
 `missile.js` is the odd one out: it is judged by eye, not by values, so it runs
 at a larger viewport and hides the console before each shot. Everything else

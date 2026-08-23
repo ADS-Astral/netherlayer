@@ -521,6 +521,17 @@ body.flying #aimchip, body.placing #aimchip { display: none; }
   pointer-events: none;
 }
 #countdown .btn { pointer-events: auto; }
+#crashcut {
+  position: absolute; inset: 0; z-index: 60; display: flex;
+  flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: rgba(3,3,8,.94); backdrop-filter: blur(3px);
+}
+#crashcut video {
+  max-width: min(96vw, 1100px); max-height: 76vh;
+  border-radius: 12px; box-shadow: 0 20px 70px rgba(0,0,0,.7);
+  border: 1px solid rgba(212,175,55,.35);
+}
+#crashcut .btn { width: auto; padding: 8px 22px; pointer-events: auto; }
 #cd-traffic {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   padding: 8px 16px; margin-bottom: 4px; border-radius: 10px;
@@ -847,6 +858,11 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   </div>
 </div>
 
+<div id="crashcut" hidden>
+  <video id="crashvid" playsinline preload="none" width="960"></video>
+  <button class="btn" id="crash-skip">Skip</button>
+</div>
+
 <div id="countdown" hidden>
   <div class="cd-num" id="cd-num">10</div>
   <div class="cd-cap" id="cd-cap">Loading the ground along the flight path</div>
@@ -900,6 +916,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   var CHUTE_CDAM = 2 * G0 / (1.225 * 18 * 18);
   var CHUTE_FILL = 0.6;      /* seconds from first tug to fully open */
   var CHUTE_AT = 0.98;       /* how far through the ballistic flight it goes */
+  var chuteForced = null;    /* set when something tears it open early */
 
   /* 1976 US Standard Atmosphere as piecewise exponentials: [base km, ρ, scale km] */
   var ATMO = [
@@ -1073,6 +1090,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     vel[1] += OMEGA * pos[0];
 
     var t = 0, apogee = -Infinity, maxQ = 0, maxG = 0, reached = null, steps = 0;
+    var wrecked = false;
     var startAlt = Math.hypot(pos[0], pos[1], pos[2]) - R_E;
     var samples = [];
     var sampleEvery = 0.02, nextSample = 0;
@@ -1105,6 +1123,22 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
                     vt: Math.sqrt(Math.max(0, vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2] - vr * vr)) };
       }
 
+      /* A mid-air. Hitting an airliner at five kilometres a second is the
+         end of the flight, not a detour through it: nearly all of the
+         round's speed goes into wreckage, and what is left of it falls
+         out of the sky from here. Taking the speed away is also what
+         makes the canopy below survivable to integrate — a chute opened
+         at Mach twelve is hundreds of thousands of g and no step small
+         enough to follow it. */
+      if (p.hitAt !== undefined && p.hitAt !== null && !wrecked && t >= p.hitAt) {
+        wrecked = true;
+        var kx = vel[0] + OMEGA * pos[1], ky = vel[1] - OMEGA * pos[0], kz = vel[2];
+        var keep = 0.03;
+        vel[0] = kx * keep - OMEGA * pos[1];
+        vel[1] = ky * keep + OMEGA * pos[0];
+        vel[2] = kz * keep;
+      }
+
       /* Air-relative velocity: the atmosphere turns with the Earth. */
       var wx = vel[0] + OMEGA * pos[1], wy = vel[1] - OMEGA * pos[0], wz = vel[2];
       var w = Math.max(Math.hypot(wx, wy, wz), 1e-6);
@@ -1123,7 +1157,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       /* The launcher page answers a question about the way up, so the
          loads it quotes are the ones on the way up. Re-entry is drawn,
          but it is not what the verdict is about. */
-      if (vr >= 0) {
+      if (vr >= 0 && !wrecked) {
         if (q > maxQ) maxQ = q;
         if (aDrag / G0 > maxG) maxG = aDrag / G0;
       }
@@ -2886,6 +2920,8 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       var f = airspace.flights[i];
       if (Math.abs((atSecond + f.tc) - f.over) < f.window) hit.push(f);
     }
+    /* earliest first: the round only gets to meet one of them */
+    hit.sort(function (a, b) { return a.tc - b.tc; });
     return hit;
   }
 
@@ -3672,8 +3708,12 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     };
     var flightSol = flyPath(arc);
     var chuteAt = null;
-    if ($('showchute').checked && flightSol.impact !== null && flightSol.duration > 2) {
-      arc.chuteAt = CHUTE_AT * flightSol.duration;
+    /* A mid-air rips the canopy out there and then, so the round comes
+       down from the collision rather than carrying on to its target. */
+    var forced = chuteForced !== null && chuteForced < flightSol.duration;
+    if (forced || ($('showchute').checked && flightSol.impact !== null && flightSol.duration > 2)) {
+      arc.chuteAt = forced ? chuteForced : CHUTE_AT * flightSol.duration;
+      if (forced) arc.hitAt = chuteForced;
       var recovered = flyPath(arc);
       if (recovered.impact !== null) { flightSol = recovered; chuteAt = arc.chuteAt; }
     }
@@ -4324,11 +4364,28 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       var due = flight.willHit[0];
       if (flight.t >= due.tc) {
         flight.hit = due;
+        var was = flight.playing;
         flight.playing = false;
-        $('playpause').textContent = '▶ Replay';
-        toast('Mid-air with ' + due.from.name + ' → ' + due.to.name +
-              ' at T+' + due.tc.toFixed(1) + ' s, ' + kmStr(due.alt) + ' up. ' +
-              'The count did warn you.', 7000);
+        playCrashCut(function () {
+          /* and on, under canopy, down to where it happened */
+          toast('Mid-air with ' + due.from.name + ' → ' + due.to.name +
+                ' at T+' + due.tc.toFixed(1) + ' s, ' + kmStr(due.alt) + ' up. ' +
+                'Canopy out — coming down at the crash site.', 7000);
+          /* Under canopy the round takes minutes to come down, which is
+             not minutes anybody wants to sit through. Run the descent at
+             whatever rate brings it in inside half a minute. */
+          var left = Math.max(0, solution.dur - due.tc);
+          if (left > 30) {
+            flight.rate = Math.min(50, left / 25);   /* 50 is the dial's ceiling */
+            $('rate').value = String(sliderFromRate(flight.rate));
+            $('ratelbl').textContent = rateLabel(flight.rate);
+          }
+          if (was && flight.active) {
+            flight.playing = true;
+            flight.last = 0;
+            $('playpause').textContent = '❚❚ Pause';
+          }
+        });
       }
     }
     /* A rock that was going to hit does so here, once. */
@@ -4368,6 +4425,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   function endFlight() {
     flight.active = false;
     setDoors(false);            /* shut again, ready for the next one */
+    if (chuteForced !== null) { chuteForced = null; solve(); }
     flight.playing = false;
     if (flight.raf) cancelAnimationFrame(flight.raf);
     flight.raf = null;
@@ -4840,7 +4898,22 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      is already there when the camera arrives.
      ════════════════════════════════════════════════════════════ */
 
-  var countdown = { timer: null, left: 0, running: false, loaded: 0, built: 0 };
+  var countdown = { timer: null, left: 0, running: false, loaded: 0, built: 0, t0: 0 };
+
+  /* The second the shot actually goes decides what it meets up there.
+     Both ways out of the count come through here — running it down and
+     skipping it — so a skipped count is as dangerous as a patient one. */
+  function commitLaunch() {
+    flight.launchAt = (performance.now() - countdown.t0) / 1000;
+    flight.willHit = trafficRisk(flight.launchAt);
+    /* Tear the canopy out at the collision and fly the arc that gives,
+       so the round comes down at the crash site rather than the target. */
+    if (flight.willHit.length) {
+      chuteForced = flight.willHit[0].tc;
+      solve();
+      armCrashClip();
+    }
+  }
 
   function lngLatToTile(lng, lat, z) {
     var n = Math.pow(2, z);
@@ -4926,6 +4999,69 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     return function () { stopped = true; };
   }
 
+  /* ── The mid-air ───────────────────────────────────────────────────
+     Five seconds of it, then the round comes down under canopy from
+     where it happened. The clip is only fetched when the count knows a
+     collision is coming, so a clean shot never pays for it. */
+  var CRASH_CLIP = 'higgsfield-35fceea8-2207-4af3-993a-3c3860254750.mp4';
+  var crashCut = { armed: false, playing: false, dead: false };
+
+  function armCrashClip() {
+    var v = $('crashvid');
+    if (!v || crashCut.armed) return;
+    crashCut.armed = true;
+    v.onerror = function () { crashCut.dead = true; };
+    v.src = CRASH_CLIP;
+    v.load();
+  }
+
+  /* The cut is only put on screen once the video is actually running.
+     A browser with no decoder for it, or one that refuses to start it,
+     then costs nothing at all rather than a black frame that appears
+     and vanishes; the flight simply carries on into the descent. */
+  function playCrashCut(after) {
+    var box = $('crashcut'), v = $('crashvid');
+    if (!box || !v || crashCut.playing || crashCut.dead) { after(); return; }
+    crashCut.playing = true;
+    var finished = false, guard = null;
+    function end() {
+      if (finished) return;
+      finished = true;
+      if (guard) clearTimeout(guard);
+      box.hidden = true;
+      crashCut.playing = false;
+      v.onplaying = v.onended = v.onerror = null;
+      try { v.pause(); } catch (e) {}
+      after();
+    }
+    function give() { crashCut.dead = true; end(); }
+    v.onplaying = function () {
+      box.hidden = false;
+      /* Whatever happens to the clip, it cannot hold the flight up. */
+      if (guard) clearTimeout(guard);
+      guard = setTimeout(end, (v.duration > 0 && isFinite(v.duration) ? v.duration : 6) * 1000 + 2500);
+    };
+    v.onended = end;
+    v.onerror = give;
+    $('crash-skip').onclick = end;
+    /* Nothing on screen yet, so a clip that never starts gets a short
+       leash rather than the whole length of one. */
+    guard = setTimeout(give, 2500);
+    /* Back to the top: a second launch that also ends in a mid-air
+       would otherwise find the clip already at its last frame. */
+    try { v.currentTime = 0; } catch (e) {}
+    /* The Fire button was a gesture, but it was ten seconds and a
+       countdown ago, so a browser is within its rights to refuse sound.
+       Rather than lose the shot of it, go again without. */
+    var go = v.play();
+    if (go && go.catch) go.catch(function () {
+      if (finished) return;
+      v.muted = true;
+      var quiet = v.play();
+      if (quiet && quiet.catch) quiet.catch(give);
+    });
+  }
+
   /* What the count says about the traffic: how many flights the shot
      crosses at all, and whether going on this second hits one of them. */
   function showTraffic(atSecond) {
@@ -4979,6 +5115,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     showTraffic(0);                 /* on screen before the first tick */
 
     var t0 = performance.now();
+    countdown.t0 = t0;
     var stopPreload = null;
     /* The count is the slower of two things: ten seconds on the clock,
        and the ground loading. It cannot outrun the clock, so there is
@@ -5004,9 +5141,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       countdown.timer = null;
       $('cd-num').textContent = 'LAUNCH';
       $('cd-num').classList.add('go');
-      /* The second the shot actually goes, which decides what it meets. */
-      flight.launchAt = (performance.now() - t0) / 1000;
-      flight.willHit = trafficRisk(flight.launchAt);
+      commitLaunch();
       setTimeout(function () {
         countdown.running = false;
         if (stopPreload) stopPreload();
@@ -5076,6 +5211,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     countdown.running = false;
     $('countdown').hidden = true;
     $('fire').disabled = false;
+    commitLaunch();
     startFlight();
   });
 
