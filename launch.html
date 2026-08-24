@@ -1066,6 +1066,30 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   /* What a delivery is worth: the round's own cost, plus the margin. */
   function payoutFor(perShot) { return perShot * (1 + marginPct() / 100); }
 
+  /* The way back. Dials can be turned into a launcher nobody can pay
+     for — the trim button used to do it on its own — and the ledger
+     reset is no help there, since the hole is billions of launcher and
+     the ledger is thousands of rounds. So keep the last configuration
+     the bank could cover and offer to return to it. */
+  var affordableSnap = null;
+  function snapshotConsole() {
+    var snap = {};
+    Array.prototype.forEach.call($('model').querySelectorAll('input,select'), function (el) {
+      snap[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+    return snap;
+  }
+  function restoreConsole(snap) {
+    if (!snap) return;
+    Object.keys(snap).forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = snap[id]; else el.value = snap[id];
+    });
+    refreshControls();
+    solve();
+  }
+
   function renderBank() {
     var left = bankBalance(), built = bankBuilt();
     $('vault-sum').innerHTML = money(left);
@@ -3986,9 +4010,18 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
       verdict('no', 'THE BANK CANNOT COVER IT',
         'This launcher costs <b>' + money(bill.build) + '</b> to build and the bank holds <b>' +
         money(BANK_START - bank.spent + bank.earned) + '</b>. Shorter rails, a smaller bore or ' +
-        'fewer farads — the capacitors are usually the bulk of it.');
+        'fewer farads — the capacitors are usually the bulk of it, and their price goes with ' +
+        'the square of the voltage.' +
+        (affordableSnap ? '<button class="btn" id="putback" style="margin-top:9px">' +
+                          '↩ Put the launcher back</button>' : ''));
+      var pb = $('putback');
+      if (pb) pb.addEventListener('click', function () {
+        restoreConsole(affordableSnap);
+        toast('Back to the last launcher the bank could pay for.', 4000);
+      });
     } else {
       $('fire').disabled = false;
+      affordableSnap = snapshotConsole();
     }
     map.triggerRepaint();
   }
@@ -5858,21 +5891,35 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     var want = solution && solution.want ? solution.want : readPositive($('range')) * 1000;
     var volt = $('volt');
     var lo = 1, hi = 300, best = null, bestMiss = Infinity;
+    var wasAt = volt.value, dear = false;
     for (var i = 0; i < 22; i++) {
       var v = (lo + hi) / 2;
       volt.value = String(Math.round(v * 100) / 100);
       solve();
       if (!solution || solution.flight.escaped || solution.flight.impact === null) { hi = v; continue; }
       var d = solution.downrange - want;
-      if (Math.abs(d) < bestMiss) { bestMiss = Math.abs(d); best = volt.value; }
+      /* Only voltages the bank can pay for are candidates. A farad's
+         price goes with the square of the voltage, so the search runs
+         through launchers costing hundreds of billions on its way, and
+         settling on one of those leaves a console that cannot fire and
+         a bank that no ledger reset will mend. */
+      if (bankBalance() >= 0) {
+        if (Math.abs(d) < bestMiss) { bestMiss = Math.abs(d); best = volt.value; }
+      } else dear = true;
       if (d > 0) hi = v; else lo = v;
     }
-    if (best !== null) { volt.value = best; solve(); }
+    /* Never leave the console somewhere it could not have got to itself. */
+    volt.value = best !== null ? best : wasAt;
+    solve();
     refreshControls();
-    toast(bestMiss < Math.max(2000, want * 0.01)
-      ? 'Trimmed to ' + best + ' kV — ' + kmStr(bestMiss) + ' off the target'
-      : 'Closest this bank gets is ' + kmStr(bestMiss) + ' out. Try a longer rail, ' +
-        'a lighter round, or 45° of elevation.', 5000);
+    toast(best === null
+      ? (dear ? 'Every voltage that would reach it costs more than the bank holds. ' +
+                'A longer rail or a lighter round gets there on fewer farads.'
+              : 'Nothing in range of this bank reaches the target.')
+      : bestMiss < Math.max(2000, want * 0.01)
+        ? 'Trimmed to ' + best + ' kV — ' + kmStr(bestMiss) + ' off the target'
+        : 'Closest the bank can afford is ' + kmStr(bestMiss) + ' out. Try a longer rail, ' +
+          'a lighter round, or 45° of elevation.', 5500);
   });
   $('basemap').addEventListener('change', function (e) {
     ['imagery', 'topo', 'dark'].forEach(function (id) {

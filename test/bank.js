@@ -132,7 +132,15 @@ const net = sub => {
   v = await vault();
   console.log('once it is down  ', v.sum, '·', v.sub);
   const earned = net(v.sub) + shotCost;          /* net = paid − cost */
-  if (onTarget) {
+  /* Traffic is rolled per launch, so this shot may have met an airliner
+     on the way — which is a real outcome, not a failure, and the round
+     that comes down under canopy at the crash site is correctly not a
+     delivery. Judge against what the console says after the flight, not
+     what it said before it. */
+  const landedOn = (await vault()).flag;
+  const arrived = /ON TARGET/.test(landedOn);
+  if (onTarget && !arrived) console.log('  it met an airliner on the way — ' + landedOn.slice(0, 40));
+  if (arrived) {
     console.log('  the delivery paid:', near(earned, pay, Math.abs(pay) * 0.05 + 1)
       ? 'yes, ' + money(earned) : '*** WRONG: got ' + money(earned) + ', wanted ' + money(pay));
     console.log('  which is the cost plus the margin:',
@@ -140,6 +148,8 @@ const net = sub => {
     console.log('  counted           :', /1 of 1 delivered/.test(v.sub) ? 'yes' : '*** WRONG: ' + v.sub);
   } else {
     console.log('  not a delivery, so nothing paid:', Math.abs(earned) < 1 ? 'yes' : '*** WRONG: ' + money(earned));
+    console.log('  and the round was still charged:', near(net(v.sub), -shotCost, Math.abs(shotCost) * 0.05 + 1)
+      ? 'yes' : '*** WRONG: ' + money(net(v.sub)));
   }
   await shot({ path: OUT + 'B-paid.png' });
 
@@ -155,13 +165,58 @@ const net = sub => {
     ? 'yes — ' + held : '*** WRONG: was "' + held + '", now "' + ledger(back.sub) + '"');
   console.log('  the launcher is priced afresh:', /launcher/.test(back.sub) ? 'yes' : '*** WRONG');
 
+  /* The trap: trim searches voltages up to 300 kV and a farad's price
+     goes with the square of it, so the search passes through launchers
+     costing hundreds of billions. Settling on one leaves a console that
+     cannot fire and a bank no ledger reset will mend — and trimming
+     again just does it over. Trim twice with a fiddle in between, which
+     is the sequence that found this. */
+  console.log('\n── trim, fiddle, trim again ──');
+  for (const round of ['first trim', 'after a fiddle', 'second trim']) {
+    if (round === 'after a fiddle') {
+      await p.evaluate(() => { const e = document.getElementById('angle'); e.value = '52'; e.dispatchEvent(new Event('input')); });
+    } else {
+      await p.evaluate(() => document.getElementById('trim').click());
+    }
+    await p.waitForTimeout(3200);
+    v = await vault();
+    console.log(round.padEnd(16), v.sum.padEnd(11), '| build', v.build.padEnd(10),
+                '| fire', v.fire ? 'BLOCKED' : 'ready', '|', v.flag.slice(0, 34));
+    if (v.broke) console.log('  *** WRONG: trim left the bank in the red');
+    if (v.fire && /CANNOT COVER/.test(v.flag)) console.log('  *** WRONG: stranded — the launcher cannot be paid for');
+  }
+  await shot({ path: OUT + 'B-trim.png' });
+
+  /* And if the dials are driven into the red by hand, there is a way out.
+     The voltage goes back to 30 kV first: trim leaves it low, and a
+     farad's price goes with the square of the voltage, so a hundred of
+     them is pocket change at 3 kV and twenty billion at thirty. */
+  await p.evaluate(() => { const e = document.getElementById('volt'); e.value = '30'; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); });
+  await p.waitForTimeout(1500);
+  await p.evaluate(() => { const e = document.getElementById('bankN'); e.value = '400'; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); });
+  await p.waitForTimeout(2600);
+  v = await vault();
+  console.log('\nby hand, 200 F  ', v.sum, '| build', v.build, '| fire', v.fire ? 'BLOCKED' : 'ready');
+  const hasWayBack = await p.evaluate(() => !!document.getElementById('putback'));
+  console.log('  it offers a way back:', hasWayBack ? 'yes' : '*** WRONG: no button');
+  if (hasWayBack) {
+    await p.evaluate(() => document.getElementById('putback').click());
+    await p.waitForTimeout(2600);
+    v = await vault();
+    console.log('  after putting it back:', v.sum, '| build', v.build, '| fire', v.fire ? 'BLOCKED' : 'ready');
+    console.log('  the bank is out of the red:', !v.broke ? 'yes' : '*** WRONG: still negative');
+    console.log('  and it can fire again    :', !v.fire ? 'yes' : '*** WRONG: still blocked');
+  }
+
   /* A launcher nobody can pay for. The farads are the bulk of the bill,
      and they are the honest way to overspend — a rail long enough to do
      it is rejected as nonsense before the costing is ever reached. */
+  await p.evaluate(() => { const e = document.getElementById('volt'); e.value = '30'; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); });
+  await p.waitForTimeout(1200);
   await p.evaluate(() => { const e = document.getElementById('bankN'); e.value = '200'; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); });
   await p.waitForTimeout(2800);
   v = await vault();
-  console.log('\n100 farads      ', v.sum, '| build', v.build);
+  console.log('\n100 farads at 30 kV', v.sum, '| build', v.build);
   console.log('  the bank is over :', v.broke ? 'yes' : '*** WRONG: not flagged');
   console.log('  firing is blocked:', v.fire ? 'yes' : '*** WRONG: still armed');
   console.log('  and it says why  :', /CANNOT COVER/.test(v.flag) ? 'yes' : '*** WRONG: ' + v.flag);
