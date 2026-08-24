@@ -602,6 +602,16 @@ body.flying #aimchip, body.placing #aimchip { display: none; }
 .orbit::after { inset: 13px; border-top-color: var(--accent); animation-duration: .9s; animation-direction: reverse; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #loader .t { font-size: 12px; letter-spacing: .22em; color: var(--muted); text-transform: uppercase; }
+#loader .stuck {
+  max-width: 460px; font-size: 12.5px; line-height: 1.6; color: var(--text);
+  background: rgba(10,10,22,.8); border: 1px solid rgba(231,76,60,.4);
+  border-radius: 12px; padding: 12px 15px; text-align: left;
+}
+#loader .stuck b { color: var(--gold2); }
+#loader .stuck code {
+  font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted); word-break: break-all;
+}
 
 #toast {
   position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%) translateY(12px);
@@ -933,6 +943,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
 <div id="loader">
   <div class="orbit"></div>
   <div class="t">Preparing the range</div>
+  <div class="stuck" id="loader-stuck" hidden></div>
 </div>
 
 <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
@@ -1674,6 +1685,7 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
   /* Where the range is. The page opens looking at it, and the starting
      pad goes here rather than wherever the camera happened to land. */
   var HOME = { lng: 132.7394349, lat: -23.0788817 };
+  var demErrors = 0;
 
   var map;
   try {
@@ -5973,7 +5985,29 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
      BOOT
      ════════════════════════════════════════════════════════════ */
 
+  /* A spinner that never stops says nothing, and "it just hangs" is not
+     something anyone can act on. If the map has not come up in half a
+     minute, say what is still outstanding and what usually fixes it. */
+  var booted = false;
+  setTimeout(function () {
+    if (booted) return;
+    var box = $('loader-stuck');
+    if (!box) return;
+    var why = [];
+    if (typeof maplibregl === 'undefined') why.push('the map library never arrived');
+    if (!map) why.push('the map was never built');
+    if (demErrors) why.push(demErrors + ' elevation tiles failed');
+    box.hidden = false;
+    box.innerHTML =
+      '<b>This is taking longer than it should.</b><br>' +
+      (why.length ? why.join(', ') + '.<br>' : 'The map has not finished starting.<br>') +
+      'Two things fix nearly all of this: a hard reload to clear a stale copy of the ' +
+      'page (⇧⌘R, or Ctrl+F5), and a look at the browser console for the first red ' +
+      'line. If it says something about WebGL, this machine cannot draw the globe.';
+  }, 30000);
+
   map.on('load', function () {
+    booted = true;
     map.setTerrain({ source: 'dem', exaggeration: 1 });
     map.addLayer(rangeLayer);
     map.setVerticalFieldOfView(48);
@@ -5999,7 +6033,6 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     }, 400);
   });
 
-  var demErrors = 0;
   map.on('error', function (e) {
     var msg = (e && e.error && e.error.message) || '';
     if (/terrarium|elevation-tiles/.test(msg) && ++demErrors === 12) {
