@@ -5993,17 +5993,37 @@ body.flying .maplibregl-ctrl-scale, .maplibregl-ctrl-scale.unmeasurable { displa
     if (booted) return;
     var box = $('loader-stuck');
     if (!box) return;
+    /* Ask the map what it is waiting for rather than guessing. It only
+       announces itself loaded once the style and every source it needs
+       are in, so a single stalled tile server holds the whole page. */
     var why = [];
     if (typeof maplibregl === 'undefined') why.push('the map library never arrived');
-    if (!map) why.push('the map was never built');
-    if (demErrors) why.push(demErrors + ' elevation tiles failed');
+    else if (!map) why.push('the map was never built');
+    else {
+      try {
+        if (!map.isStyleLoaded()) why.push('the style has not finished');
+        var waiting = [], names = Object.keys(map.getStyle().sources || {});
+        names.forEach(function (id) {
+          try { if (!map.isSourceLoaded(id)) waiting.push(id); } catch (e) {}
+        });
+        if (waiting.length) why.push('still waiting on ' + waiting.join(', '));
+      } catch (e) { why.push('the map will not answer: ' + e.message); }
+    }
+    if (demErrors) why.push(demErrors + ' elevation tiles have failed');
     box.hidden = false;
     box.innerHTML =
       '<b>This is taking longer than it should.</b><br>' +
-      (why.length ? why.join(', ') + '.<br>' : 'The map has not finished starting.<br>') +
-      'Two things fix nearly all of this: a hard reload to clear a stale copy of the ' +
-      'page (⇧⌘R, or Ctrl+F5), and a look at the browser console for the first red ' +
-      'line. If it says something about WebGL, this machine cannot draw the globe.';
+      (why.length ? why.join('; ') + '.<br>' : 'The map has not finished starting.<br>') +
+      'Most often this is the tile servers rather than the page. A hard reload ' +
+      '(⇧⌘R, or Ctrl+F5) clears a stale copy; the first red line in the browser ' +
+      'console says the rest. If it mentions WebGL, this machine cannot draw the globe.' +
+      '<br><br><button class="btn" id="loader-anyway" style="width:auto;padding:7px 16px">' +
+      'Show me the page anyway</button>';
+    var anyway = $('loader-anyway');
+    if (anyway) anyway.addEventListener('click', function () {
+      $('loader').classList.add('gone');
+      setTimeout(function () { $('loader').style.display = 'none'; }, 800);
+    });
   }, 30000);
 
   map.on('load', function () {
